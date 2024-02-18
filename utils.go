@@ -12,13 +12,14 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 )
 
 func getHashFromBytes(b []byte) (string, error) {
 	h := sha1.New()
 	_, err := h.Write(b)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("getHashFromBytes: %w", err)
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
@@ -26,7 +27,7 @@ func getHashFromBytes(b []byte) (string, error) {
 func getHashFromString(s string) (string, error) {
 	hash, err := getHashFromBytes([]byte(s))
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("getHashFromString: %w", err)
 	}
 	return hash, nil
 }
@@ -38,12 +39,12 @@ func getHash[T any](arr []T) (string, error) {
 		case []byte:
 			_, err := h.Write(t)
 			if err != nil {
-				return "", err
+				return "", fmt.Errorf("getHash[[]byte]]: %w", err)
 			}
 		case string:
 			_, err := io.WriteString(h, t)
 			if err != nil {
-				return "", err
+				return "", fmt.Errorf("getHash[string]: %w", err)
 			}
 		default:
 			return "", fmt.Errorf("could not hash input: %v", t)
@@ -52,62 +53,92 @@ func getHash[T any](arr []T) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func restrictedDelete(file string) bool {
+func restrictedDelete(file string) error {
 	// check if file in dir that contains .gitlet
 	_, err := os.Stat(filepath.Join(filepath.Dir(file), ".gitlet"))
 	if errors.Is(err, os.ErrNotExist) {
-		log.Fatal("Not in an initialized Gitlet directory:", filepath.Dir(file))
+		log.Fatal("Not in an initialized Gitlet directory: ", filepath.Dir(file))
 	}
 	fileInfo, err := os.Stat(file)
-	if errors.Is(err, fs.ErrNotExist) || fileInfo.IsDir() {
-		return false
-	}
-	err = os.Remove(file)
 	if err != nil {
-		log.Fatal("Could not delete file:", file)
+		if errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("restrictedDelete: %w", err)
+		} else {
+			return err
+		}
 	}
-	return true
+	if fileInfo.IsDir() {
+		return fmt.Errorf("restrictedDelete: cannot delete directory '%v'", file)
+	}
+	return os.Remove(file)
 }
 
 func readContentsToBytes(file string) ([]byte, error) {
 	fileBytes, err := os.ReadFile(file)
 	if err != nil {
-		return nil, nil
+		return nil, fmt.Errorf("readContentsToBytes: %w", err)
 	}
-	return fileBytes, nil
+	return bytes.TrimRight(fileBytes, "\n"), nil
 }
 
 func readContentsToString(file string) (string, error) {
-	fileBytes, err := os.ReadFile(file)
+	fileBytes, err := readContentsToBytes(file)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("readContentsToString: %w", err)
 	}
 	return string(fileBytes), nil
 }
 
-func writeContents(file string, b []byte) error {
+// Write all contents of an array of strings or byte arrays to a file.
+// If the file does not exist, it is created.
+// Returns an error if the file is a directory.
+func writeContents[T any](file string, arr []T) error {
 	fileInfo, err := os.Stat(file)
 	if (err != nil) && !errors.Is(err, fs.ErrNotExist) {
-		return err
+		return fmt.Errorf("writeContents: %w", err)
 	}
 	if (err == nil) && fileInfo.IsDir() {
-		return errors.New("cannot overwrite directory")
+		return fmt.Errorf("writeContents: cannot overwrite directory '%v'", file)
 	}
-	return os.WriteFile(file, b, 0666)
+	f, err := os.OpenFile(file, os.O_WRONLY|os.O_CREATE, 0644)
+	if err != nil {
+		return fmt.Errorf("writeContents: cannot open file '%v': %w", file, err)
+	}
+	for _, a := range arr {
+		switch t := any(a).(type) {
+		case string:
+			if _, err := f.WriteString(t); err != nil {
+				return err
+			}
+		case []byte:
+			if _, err := f.Write(t); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("writeContents: %v is not an array of strings or byte arrays", t)
+		}
+	}
+	_, err = f.WriteString("\n")
+	if err != nil {
+		return fmt.Errorf("writeContents: cannot write newline: %w", err)
+	}
+	return f.Close()
 }
 
-func getFiles(dir string) []string {
-	files, err := os.ReadDir(".")
+// Return a sorted list of filenames in the directory.
+func getFilenames(dir string) ([]string, error) {
+	files, err := os.ReadDir(dir)
 	if err != nil {
-		log.Fatal(err)
+		return nil, fmt.Errorf("getFilenames: %w", err)
 	}
-	filenames := []string{}
+	var filenames []string
 	for _, f := range files {
 		if !f.IsDir() && f.Type().IsRegular() {
 			filenames = append(filenames, f.Name())
 		}
 	}
-	return filenames
+	slices.Sort(filenames)
+	return filenames, nil
 }
 
 // serialize object and return as byte array
@@ -116,7 +147,7 @@ func serialize[T any](obj T) ([]byte, error) {
 	enc := gob.NewEncoder(&stream)
 	err := enc.Encode(obj)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("serialize: %w", err)
 	}
 	return stream.Bytes(), nil
 }
@@ -126,12 +157,12 @@ func deserialize[T any](b []byte) (T, error) {
 	stream := bytes.Buffer{}
 	_, err := stream.Write(b)
 	if err != nil {
-		return output, err
+		return output, fmt.Errorf("deserialize: write byte stream: %w", err)
 	}
 	dec := gob.NewDecoder(&stream)
 	err = dec.Decode(&output)
 	if err != nil {
-		return output, err
+		return output, fmt.Errorf("deserialize: decode byte stream: %w", err)
 	}
 	return output, nil
 }
@@ -140,14 +171,14 @@ func createBlobFromFile(file string) error {
 	// read file contents
 	contents, err := readContentsToBytes(file)
 	if err != nil {
-		return err
+		return fmt.Errorf("createBlobFromFile: %w", err)
 	}
 	// get hash
 	hash, err := getHashFromBytes(contents)
 	if err != nil {
-		return err
+		return fmt.Errorf("createBlobFromFile: %w", err)
 	}
 	// write to .gitlet/blob/
 	blobPath := filepath.Join(filepath.Dir(file), ".gitlet", "blob", hash)
-	return writeContents(blobPath, contents)
+	return writeContents[[]byte](blobPath, [][]byte{contents})
 }

@@ -21,14 +21,10 @@ func main() {
 	switch commandArg {
 	case "init":
 		validateArgs(os.Args, 1)
-		err := os.Mkdir(".gitlet", 0750)
-		// panic if already exists
-		if err != nil && errors.Is(err, fs.ErrExist) {
-			log.Fatal("A Gitlet version-control system already exists in the current directory.")
+		if err := initRepository(); err != nil {
+			log.Fatal(err)
 		}
-		repo := newRepository()
-		fmt.Println("Initialized empty Gitlet repository in", repo.gitlet_dir)
-		// create master branch
+		fmt.Println("Gitlet repository initialized (on branch 'main').")
 
 		// create initial commit
 		initialCommit := commit{
