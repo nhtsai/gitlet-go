@@ -15,23 +15,6 @@ import (
 	"slices"
 )
 
-func getHashFromBytes(b []byte) (string, error) {
-	h := sha1.New()
-	_, err := h.Write(b)
-	if err != nil {
-		return "", fmt.Errorf("getHashFromBytes: %w", err)
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
-}
-
-func getHashFromString(s string) (string, error) {
-	hash, err := getHashFromBytes([]byte(s))
-	if err != nil {
-		return "", fmt.Errorf("getHashFromString: %w", err)
-	}
-	return hash, nil
-}
-
 func getHash[T any](arr []T) (string, error) {
 	h := sha1.New()
 	for _, a := range arr {
@@ -56,7 +39,8 @@ func getHash[T any](arr []T) (string, error) {
 func restrictedDelete(file string) error {
 	// check if file in dir that contains .gitlet
 	_, err := os.Stat(filepath.Join(filepath.Dir(file), ".gitlet"))
-	if errors.Is(err, os.ErrNotExist) {
+	inGitletSubDir := slices.Contains(filepath.SplitList(file), ".gitlet")
+	if errors.Is(err, os.ErrNotExist) && !inGitletSubDir {
 		log.Fatal("Not in an initialized Gitlet directory: ", filepath.Dir(file))
 	}
 	fileInfo, err := os.Stat(file)
@@ -167,14 +151,14 @@ func deserialize[T any](b []byte) (T, error) {
 	return output, nil
 }
 
-func createBlobFromFile(file string) error {
+func createBlobFromFile(file string, prefix string) error {
 	// read file contents
 	contents, err := readContentsToBytes(file)
 	if err != nil {
 		return fmt.Errorf("createBlobFromFile: %w", err)
 	}
 	// get hash
-	hash, err := getHashFromBytes(contents)
+	hash, err := getHash[any]([]any{prefix, contents})
 	if err != nil {
 		return fmt.Errorf("createBlobFromFile: %w", err)
 	}

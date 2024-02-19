@@ -2,23 +2,32 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"os"
-	"path/filepath"
 	"slices"
 	"testing"
 )
 
-func setupTempDir(t *testing.T) string {
-	tempDir := t.TempDir()
-	err := os.Mkdir(filepath.Join(tempDir, ".gitlet"), 0755)
-	if err != nil {
-		t.Errorf("Could not create test directory: %v", err)
+func mkTempDir(dir string) error {
+	err1 := os.Mkdir(dir, 0755)
+	err2 := os.Chmod(dir, 0755)
+	if err := errors.Join(err1, err2); err != nil {
+		return err
 	}
-	err = os.Chmod(filepath.Join(tempDir, ".gitlet"), 0755)
-	if err != nil {
-		t.Errorf("Could not set .gitlet directory perms: %v", err)
+	return nil
+}
+
+func setupTempDir(t *testing.T) {
+	if err := os.Chdir(t.TempDir()); err != nil {
+		t.Fatal(err)
 	}
-	return tempDir
+}
+
+func setupTestRepo(t *testing.T) {
+	setupTempDir(t)
+	if err := initRepository(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestGetFilenames(t *testing.T) {
@@ -28,36 +37,6 @@ func TestGetFilenames(t *testing.T) {
 	}
 	for _, f := range files {
 		t.Log(f)
-	}
-}
-
-func TestGetHashFromString(t *testing.T) {
-	contents := "This page intentionally left blank."
-	actual, err := getHashFromString(contents)
-	if err != nil {
-		t.Fatal("Could not get hash.")
-	}
-	expected := "af064923bbf2301596aac4c273ba32178ebc4a96"
-	if len(actual) != 40 {
-		t.Errorf("Incorrect hash length, want 40, got %d.", len(actual))
-	}
-	if actual != expected {
-		t.Errorf("Want %v, got %v", expected, actual)
-	}
-}
-
-func TestGetHashFromBytes(t *testing.T) {
-	contents := []byte("This page intentionally left blank.")
-	actual, err := getHashFromBytes(contents)
-	if err != nil {
-		t.Fatal("Could not get hash.")
-	}
-	expected := "af064923bbf2301596aac4c273ba32178ebc4a96"
-	if len(actual) != 40 {
-		t.Errorf("Incorrect hash length, want 40, got %d.", len(actual))
-	}
-	if actual != expected {
-		t.Errorf("Want %v, got %v", expected, actual)
 	}
 }
 
@@ -77,8 +56,8 @@ func TestGetHash(t *testing.T) {
 }
 
 func TestRestrictedDeleteDirectory(t *testing.T) {
-	tempDir := setupTempDir(t)
-	testDir := filepath.Join(tempDir, "foo")
+	setupTestRepo(t)
+	testDir := "foo"
 	os.Mkdir(testDir, 0755)
 	err := restrictedDelete(testDir)
 	if err == nil {
@@ -87,8 +66,8 @@ func TestRestrictedDeleteDirectory(t *testing.T) {
 }
 
 func TestRestrictedDeleteFileNotExist(t *testing.T) {
-	tempDir := setupTempDir(t)
-	testFile := filepath.Join(tempDir, "baz.go")
+	setupTestRepo(t)
+	testFile := "baz.go"
 	err := restrictedDelete(testFile)
 	if err == nil {
 		t.Fatalf(`restrictedDelete("%v") occurred, want fail.`, testFile)
@@ -96,8 +75,8 @@ func TestRestrictedDeleteFileNotExist(t *testing.T) {
 }
 
 func TestRestrictedDeleteFile(t *testing.T) {
-	tempDir := setupTempDir(t)
-	testFile := filepath.Join(tempDir, "baz.go")
+	setupTestRepo(t)
+	testFile := "baz.go"
 	f, err := os.Create(testFile)
 	if err != nil {
 		t.Errorf("Could not create test file: %v", err)
@@ -110,8 +89,8 @@ func TestRestrictedDeleteFile(t *testing.T) {
 }
 
 func TestReadContentsToBytes(t *testing.T) {
-	tempDir := setupTempDir(t)
-	testFile := filepath.Join(tempDir, "foo.txt")
+	setupTempDir(t)
+	testFile := "foo.txt"
 	expected := []byte("Hello, world!")
 	os.WriteFile(testFile, expected, 0644)
 
@@ -126,8 +105,8 @@ func TestReadContentsToBytes(t *testing.T) {
 }
 
 func TestReadContentsToString(t *testing.T) {
-	tempDir := setupTempDir(t)
-	testFile := filepath.Join(tempDir, "foo.txt")
+	setupTempDir(t)
+	testFile := "foo.txt"
 	expected := []byte("Hello, world!")
 	os.WriteFile(testFile, expected, 0644)
 
@@ -142,8 +121,8 @@ func TestReadContentsToString(t *testing.T) {
 }
 
 func TestWriteContents(t *testing.T) {
-	tempDir := setupTempDir(t)
-	testFile := filepath.Join(tempDir, "foo.txt")
+	setupTempDir(t)
+	testFile := "foo.txt"
 	expected := []byte("Hello, world!")
 	err := writeContents[[]byte](testFile, [][]byte{expected})
 	if err != nil {
