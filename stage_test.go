@@ -11,8 +11,8 @@ import (
 func TestIndex(t *testing.T) {
 	setupTestRepo(t)
 	var expectedIndex stagedFileMap = make(stagedFileMap)
-	expectedIndex["foo"] = stageMetadata{"123", time.Now().Unix(), 123}
-	expectedIndex["bar"] = stageMetadata{"456", time.Now().Unix(), 456}
+	expectedIndex["foo"] = stageMetadata{"123", time.Now().UTC().Unix(), 123}
+	expectedIndex["bar"] = stageMetadata{"456", time.Now().UTC().Unix(), 456}
 
 	if err := writeIndex(expectedIndex); err != nil {
 		t.Fatal(err)

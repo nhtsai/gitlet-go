@@ -3,8 +3,8 @@ package main
 import (
 	"bytes"
 	"crypto/sha1"
-	"encoding/gob"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -127,42 +127,105 @@ func getFilenames(dir string) ([]string, error) {
 
 // serialize object and return as byte array
 func serialize[T any](obj T) ([]byte, error) {
-	stream := bytes.Buffer{}
-	enc := gob.NewEncoder(&stream)
-	err := enc.Encode(obj)
+	b, err := json.Marshal(obj)
 	if err != nil {
 		return nil, fmt.Errorf("serialize: %w", err)
 	}
-	return stream.Bytes(), nil
+	return b, nil
 }
 
 func deserialize[T any](b []byte) (T, error) {
-	var output T
-	stream := bytes.Buffer{}
-	_, err := stream.Write(b)
-	if err != nil {
-		return output, fmt.Errorf("deserialize: write byte stream: %w", err)
+	var obj T
+	if err := json.Unmarshal(b, &obj); err != nil {
+		return obj, fmt.Errorf("deserialize: %w", err)
 	}
-	dec := gob.NewDecoder(&stream)
-	err = dec.Decode(&output)
-	if err != nil {
-		return output, fmt.Errorf("deserialize: decode byte stream: %w", err)
-	}
-	return output, nil
+	return obj, nil
 }
 
-func createBlobFromFile(file string, prefix string) error {
-	// read file contents
-	contents, err := readContentsToBytes(file)
-	if err != nil {
-		return fmt.Errorf("createBlobFromFile: %w", err)
-	}
-	// get hash
-	hash, err := getHash[any]([]any{prefix, contents})
-	if err != nil {
-		return fmt.Errorf("createBlobFromFile: %w", err)
-	}
-	// write to .gitlet/blob/
-	blobPath := filepath.Join(filepath.Dir(file), ".gitlet", "blob", hash)
-	return writeContents[[]byte](blobPath, [][]byte{contents})
-}
+// func serialize[T any](obj T) ([]byte, error) {
+// 	buf := bytes.Buffer{}
+// 	enc := gob.NewEncoder(&buf)
+// 	err := enc.Encode(obj)
+// 	if err != nil {
+// 		return nil, fmt.Errorf("serialize: %w", err)
+// 	}
+// 	return buf.Bytes(), nil
+// }
+
+// func deserialize[T any](b []byte) (T, error) {
+// 	var obj T
+// 	buf := bytes.Buffer{}
+// 	_, err := buf.Write(b)
+// 	if err != nil {
+// 		return obj, fmt.Errorf("deserialize: write byte stream: %w", err)
+// 	}
+// 	dec := gob.NewDecoder(&buf)
+// 	err = dec.Decode(&obj)
+// 	if err != nil {
+// 		return obj, fmt.Errorf("deserialize: decode byte stream: %w", err)
+// 	}
+// 	return obj, nil
+// }
+
+// func serialize[T any](obj T) ([]byte, error) {
+// 	buf := new(bytes.Buffer)
+// 	err := binary.Write(buf, binary.LittleEndian, obj)
+// 	if err != nil {
+// 		return nil, fmt.Errorf("serialize: %w", err)
+// 	}
+// 	return buf.Bytes(), nil
+// }
+
+// func deserialize[T any](b []byte) (T, error) {
+// 	var obj T
+// 	buf := bytes.NewReader(b)
+// 	err := binary.Read(buf, binary.LittleEndian, &obj)
+// 	if err != nil {
+// 		return obj, fmt.Errorf("deserialize: %w", err)
+// 	}
+// 	return obj, nil
+// }
+
+// func createBlobFromFile(file string, prefix string) error {
+// 	// read file contents
+// 	contents, err := readContentsToBytes(file)
+// 	if err != nil {
+// 		return fmt.Errorf("createBlobFromFile: %w", err)
+// 	}
+// 	// get hash
+// 	hash, err := getHash[any]([]any{prefix, contents})
+// 	if err != nil {
+// 		return fmt.Errorf("createBlobFromFile: %w", err)
+// 	}
+// 	// write to .gitlet/blob/
+// 	blobPath := filepath.Join(filepath.Dir(file), ".gitlet", "blob", hash)
+// 	return writeContents[[]byte](blobPath, [][]byte{contents})
+// }
+
+// need serialize: commit blob, index,
+// need header: commit blob, file blob
+
+// func writeBlob[T any](header string, obj T) error {
+// 	var contents []byte
+// 	var err error
+// 	switch t := any(obj).(type) {
+// 	case commit:
+// 		contents, err = serialize[commit](t)
+// 		if err != nil {
+// 			return err
+// 		}
+// 	case []byte:
+// 		contents = t
+// 	default:
+// 		return errors.New("cannot write blob")
+// 	}
+// 	payload := []any{header, fmt.Sprint(len(content)), byte(0), content}
+// 	getHash[any](payload)
+// 	writeContents("blob", payload)
+// 	return nil
+// }
+
+// func readBlob[T any](content []byte) (T, error) {
+// 	var obj T
+// 	return obj, nil
+// }

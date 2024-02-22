@@ -1,7 +1,9 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"os"
 	"path/filepath"
@@ -23,13 +25,10 @@ func initRepository() error {
 	if err != nil {
 		return err
 	}
-	initialCommit := &commit{
-		UID:        initialCommitUID,
-		Message:    "initial commit",
-		Timestamp:  time.Date(1970, time.January, 1, 0, 0, 0, 0, time.UTC),
-		FileToBlob: make(map[string]string),
-		ParentUIDs: [2]string{},
-	}
+	var initialCommit = new(commit)
+	initialCommit.UID = initialCommitUID
+	initialCommit.Message = "initial commit"
+	initialCommit.Timestamp = time.Date(1970, time.January, 1, 0, 0, 0, 0, time.UTC).Unix()
 
 	// write initial commit blob
 	err = initialCommit.writeBlob()
@@ -58,5 +57,82 @@ func initRepository() error {
 	if err != nil {
 		return fmt.Errorf("initRepository: cannot create index: %w", err)
 	}
+	return nil
+}
+
+// Print commit log from head of current branch to initial commit.
+func printBranchLog() error {
+	headBranchFile, err := readContentsToString(filepath.Join(".gitlet", "HEAD"))
+	if err != nil {
+		return err
+	}
+	headCommitHash, err := readContentsToString(headBranchFile)
+	if err != nil {
+		return err
+	}
+	headCommitData, err := readContentsToBytes(filepath.Join(".gitlet", "objects", headCommitHash))
+	if err != nil {
+		return err
+	}
+	headCommit, err := deserialize[commit](headCommitData)
+	if err != nil {
+		return err
+	}
+	var curr = headCommit
+	for {
+		fmt.Printf("===\n%v\n", curr.String())
+		if curr.ParentUIDs[0] == "" {
+			break
+		}
+		curr, err = getCommit(curr.ParentUIDs[0])
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Add a new branch pointing to the head commit of the current branch.
+// Does not automatically switch to the new branch.
+func addBranch(branchName string) error {
+	branchFile := filepath.Join(".gitlet", "refs", "heads", branchName)
+	if _, err := os.Stat(branchFile); err == nil {
+		log.Fatal("A branch with that name already exists.")
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	currentBranchFile, err := readContentsToString(filepath.Join(".gitlet", "HEAD"))
+	if err != nil {
+		return err
+	}
+	headCommitHash, err := readContentsToBytes(currentBranchFile)
+	if err != nil {
+		return err
+	}
+	if err := writeContents(branchFile, [][]byte{headCommitHash}); err != nil {
+		return err
+	}
+	log.Printf("Branch '%v' was created on commit (%v).\n", branchName, string(headCommitHash[:6]))
+	return nil
+}
+
+func removeBranch(branchName string) error {
+	headBranchFile, err := readContentsToString(filepath.Join(".gitlet", "HEAD"))
+	if err != nil {
+		return err
+	}
+	if filepath.Base(headBranchFile) == branchName {
+		log.Fatal("Cannot remove the current branch.")
+	}
+
+	err = os.Remove(filepath.Join(".gitlet", "refs", "heads", branchName))
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			log.Fatal("A branch with that name does not exist.")
+		} else {
+			return err
+		}
+	}
+	log.Printf("Branch '%v' has been deleted.\n", branchName)
 	return nil
 }

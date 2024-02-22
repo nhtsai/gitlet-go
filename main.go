@@ -4,19 +4,21 @@ package main
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"log"
 	"os"
-	"time"
+	"path/filepath"
 )
 
 func main() {
-	log.SetFlags(0)
+	log.SetFlags(log.Lshortfile)
 	if len(os.Args) == 1 {
 		log.Fatal("Please enter a command.")
 	}
 
 	var commandArg string = os.Args[1]
+	if commandArg != "init" {
+		checkGitletInit()
+	}
 
 	switch commandArg {
 	case "init":
@@ -25,30 +27,39 @@ func main() {
 			log.Fatal(err)
 		}
 		fmt.Println("Gitlet repository initialized (on branch 'main').")
-
-		// create initial commit
-		initialCommit := commit{
-			message:    "initial commit",
-			timestamp:  time.Date(1970, time.January, 1, 0, 0, 0, 0, time.UTC),
-			fileToBlob: make(map[string]string),
-			parent1:    "",
-			parent2:    "",
+	case "add":
+		validateArgs(os.Args, 2)
+		file := os.Args[2]
+		if err := stageFile(file); err != nil {
+			log.Fatal(err)
 		}
-		err = repo.addCommit(initialCommit)
+	case "commit":
+		validateArgs(os.Args, 2)
+		message := os.Args[2]
+		commit, err := createCommit(message)
 		if err != nil {
 			log.Fatal(err)
 		}
-
-	case "add":
-		checkGitletInit()
-	case "commit":
-		checkGitletInit()
+		err = commit.writeBlob()
+		if err != nil {
+			log.Fatal(err)
+		}
+	case "rm":
+		validateArgs(os.Args, 2)
+		file := os.Args[2]
+		if err := unstageFile(file); err != nil {
+			log.Fatal(err)
+		}
 	case "log":
-		checkGitletInit()
 		validateArgs(os.Args, 1)
+		if err := printBranchLog(); err != nil {
+			log.Fatal(err)
+		}
 	case "global-log":
-		checkGitletInit()
 		validateArgs(os.Args, 1)
+		if err := printAllCommits(); err != nil {
+			log.Fatal(err)
+		}
 	case "find":
 		checkGitletInit()
 	case "status":
@@ -67,9 +78,21 @@ func main() {
 	case "checkout":
 		checkGitletInit()
 	case "branch":
-		checkGitletInit()
+		validateArgs(os.Args, 2)
+		branchName := os.Args[2]
+		err := addBranch(branchName)
+		if err != nil {
+			log.Fatal("Could not create new branch: ", err)
+		}
+
 	case "rm-branch":
-		checkGitletInit()
+		validateArgs(os.Args, 2)
+		branchName := os.Args[2]
+		err := removeBranch(branchName)
+		if err != nil {
+			log.Fatal("Could not remove branch: ", err)
+		}
+
 	case "reset":
 		checkGitletInit()
 	case "merge":

@@ -139,38 +139,52 @@ func TestWriteContents(t *testing.T) {
 	}
 }
 
-func TestCreateBlobFromFile(t *testing.T) {
-	tempDir := setupTempDir(t)
-
-	testFile := filepath.Join(tempDir, "foo.txt")
-	expected := []byte("This is a wug.")
-	err := os.WriteFile(testFile, expected, 0644)
-	if err != nil {
-		t.Error(err)
-	}
-
-	err = os.MkdirAll(filepath.Join(tempDir, ".gitlet", "blob"), 0755)
-	if err != nil {
-		t.Error(err)
-	}
-	// needs execute permission
-	err = os.Chmod(filepath.Join(tempDir, ".gitlet", "blob"), 0755)
-	if err != nil {
-		t.Errorf("Could not set .gitlet directory perms: %v", err)
-	}
-
-	err = createBlobFromFile(testFile)
-	if err != nil {
-		t.Error(err)
-	}
-	files, err := os.ReadDir(filepath.Join(tempDir, ".gitlet", "blob"))
+func TestSerialization(t *testing.T) {
+	expected := "This is a wug."
+	b, err := serialize[string](expected)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, file := range files {
-		if file.Name() == "b0438c11aca0470310517c59f2cbd763d1e5cbb4" {
-			return
-		}
+	actual, err := deserialize[string](b)
+	if err != nil {
+		t.Fatal(err)
 	}
-	t.Fail()
+	if actual != expected {
+		t.Fatalf("Incorrect serialization/deserialization: want %v, got %v", expected, actual)
+	}
 }
+
+// func TestCreateBlobFromFile(t *testing.T) {
+// 	setupTempDir(t)
+// 	testFile := "foo.txt"
+// 	expected := []byte("This is a wug.")
+// 	err := os.WriteFile(testFile, expected, 0644)
+// 	if err != nil {
+// 		t.Error(err)
+// 	}
+
+// 	err = os.MkdirAll(filepath.Join(".gitlet", "blob"), 0755)
+// 	if err != nil {
+// 		t.Error(err)
+// 	}
+// 	// needs execute permission
+// 	err = os.Chmod(filepath.Join(".gitlet", "blob"), 0755)
+// 	if err != nil {
+// 		t.Errorf("Could not set .gitlet directory perms: %v", err)
+// 	}
+
+// 	err = createBlobFromFile(testFile)
+// 	if err != nil {
+// 		t.Error(err)
+// 	}
+// 	files, err := os.ReadDir(filepath.Join(".gitlet", "blob"))
+// 	if err != nil {
+// 		t.Fatal(err)
+// 	}
+// 	for _, file := range files {
+// 		if file.Name() == "b0438c11aca0470310517c59f2cbd763d1e5cbb4" {
+// 			return
+// 		}
+// 	}
+// 	t.Fail()
+// }
