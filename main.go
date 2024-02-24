@@ -1,4 +1,6 @@
-// Package main provides a simple git-like version control system called 'Gitlet'.
+/*
+Gitlet provides a simple git-like version control system.
+*/
 package main
 
 import (
@@ -26,7 +28,11 @@ func main() {
 		if err := initRepository(); err != nil {
 			log.Fatal(err)
 		}
-		fmt.Println("Gitlet repository initialized (on branch 'main').")
+		cwd, err := os.Getwd()
+		if err != nil {
+			cwd = "."
+		}
+		fmt.Printf("Initialized new Gitlet repository in %v\n", filepath.Join(cwd, ".gitlet"))
 	case "add":
 		validateArgs(os.Args, 2)
 		file := os.Args[2]
@@ -61,7 +67,11 @@ func main() {
 			log.Fatal(err)
 		}
 	case "find":
-		checkGitletInit()
+		validateArgs(os.Args, 2)
+		query := os.Args[2]
+		if err := printAllCommitIDsByMessage(query); err != nil {
+			log.Fatal(err)
+		}
 	case "status":
 		checkGitletInit()
 		validateArgs(os.Args, 1)

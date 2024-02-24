@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -140,4 +141,33 @@ func printAllCommits() error {
 			return err
 		},
 	)
+}
+
+// Prints all UIDs of commits with messages that contain a given substring query.
+func printAllCommitIDsByMessage(query string) error {
+	found := false
+	err := filepath.WalkDir(
+		filepath.Join(".gitlet", "objects"),
+		func(path string, d fs.DirEntry, err error) error {
+			if d.IsDir() {
+				return nil
+			}
+			c, c_err := getCommit(d.Name())
+			if c_err != nil {
+				return c_err
+			}
+			if strings.Contains(c.Message, query) {
+				found = true
+				fmt.Printf("commit %v\n", c.UID)
+			}
+			return err
+		},
+	)
+	if err != nil {
+		return err
+	}
+	if !found {
+		fmt.Println("Found no commit with that message.")
+	}
+	return nil
 }
