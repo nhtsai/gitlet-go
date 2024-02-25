@@ -25,7 +25,7 @@ func setupTempDir(t *testing.T) {
 
 func setupTestRepo(t *testing.T) {
 	setupTempDir(t)
-	if err := initRepository(); err != nil {
+	if err := newRepository(); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -94,7 +94,7 @@ func TestReadContentsToBytes(t *testing.T) {
 	expected := []byte("Hello, world!")
 	os.WriteFile(testFile, expected, 0644)
 
-	actual, err := readContentsToBytes(testFile)
+	actual, err := readContents(testFile)
 	if err != nil {
 		t.Fatalf("Could not read test file: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestReadContentsToString(t *testing.T) {
 	expected := []byte("Hello, world!")
 	os.WriteFile(testFile, expected, 0644)
 
-	actual, err := readContentsToString(testFile)
+	actual, err := readContentsAsString(testFile)
 	if err != nil {
 		t.Fatalf("Could not read test file: %v", err)
 	}

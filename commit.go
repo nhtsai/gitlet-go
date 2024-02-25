@@ -1,28 +1,22 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
-	"io/fs"
+	"os"
 	"path/filepath"
-	"strings"
+	"slices"
 	"time"
 )
 
+const blobHeaderDelim byte = 0
+
 type commit struct {
-	// The SHA1 hash of commit and header metadata.
-	UID string
-
-	// User supplied commit message.
-	Message string
-
-	// When the commit was created in UNIX time in UTC.
-	Timestamp int64
-
-	// Mapping from file names to blob UIDs tracked in the commit.
-	FileToBlob map[string]string
-
-	// SHA1 hash of the parent commit. Merge commits should have two parents.
-	ParentUIDs [2]string
+	UID        string            // The SHA1 hash of commit and header metadata.
+	Message    string            // User supplied commit message.
+	Timestamp  int64             // When the commit was created in UNIX time in UTC.
+	FileToBlob map[string]string // Map of file names to blob UIDs tracked in the commit.
+	ParentUIDs [2]string         // SHA1 hash of the parent commit. Merge commits should have two parents.
 }
 
 func (c *commit) String() string {
@@ -51,40 +45,10 @@ func (c *commit) String() string {
 	}
 }
 
-func createCommit(message string) (commit, error) {
-	var c commit
-	index, err := readIndex()
-	if err != nil {
-		return c, err
-	}
-	// create commit
-	c.UID = "" // hash of all staged blobs?
-	c.Message = message
-	c.Timestamp = time.Now().UTC().Unix()
-
-	c.FileToBlob = make(map[string]string)
-	for k, v := range index {
-		c.FileToBlob[k] = v.Hash
-	}
-
-	// get current head commit hash
-	currentBranchFile, err := readContentsToString(filepath.Join(".gitlet", "HEAD"))
-	if err != nil {
-		return c, err
-	}
-	headCommitHash, err := readContentsToString(currentBranchFile)
-	if err != nil {
-		return c, err
-	}
-	c.ParentUIDs = [2]string{headCommitHash}
-
-	return c, nil
-}
-
 // Return a commit given a hash.
 func getCommit(hash string) (commit, error) {
 	var c commit
-	commitData, err := readContentsToBytes(filepath.Join(".gitlet", "objects", hash))
+	commitData, err := readContents(filepath.Join(".gitlet", "objects", hash))
 	if err != nil {
 		return c, err
 	}
@@ -97,11 +61,11 @@ func getCommit(hash string) (commit, error) {
 
 func getHeadCommit() (commit, error) {
 	var c commit
-	currentBranchFile, err := readContentsToString(filepath.Join(".gitlet", "HEAD"))
+	currentBranchFile, err := readContentsAsString(filepath.Join(".gitlet", "HEAD"))
 	if err != nil {
 		return c, err
 	}
-	headCommitHash, err := readContentsToString(currentBranchFile)
+	headCommitHash, err := readContentsAsString(currentBranchFile)
 	if err != nil {
 		return c, err
 	}
@@ -112,62 +76,53 @@ func getHeadCommit() (commit, error) {
 	return c, nil
 }
 
-func (c *commit) writeBlob() error {
-	b, err := serialize[*commit](c)
-	if err != nil {
-		return fmt.Errorf("commit: writeBlob: %w", err)
-	}
-	commitFile := filepath.Join(".gitlet", "objects", c.UID)
-	err = writeContents[any](commitFile, []any{b})
-	if err != nil {
-		return fmt.Errorf("commit: writeBlob: %w", err)
-	}
-	return nil
-}
-
-// print all commits
-func printAllCommits() error {
-	return filepath.WalkDir(
-		filepath.Join(".gitlet", "objects"),
-		func(path string, d fs.DirEntry, err error) error {
-			if d.IsDir() {
-				return nil
-			}
-			c, c_err := getCommit(d.Name())
-			if c_err != nil {
-				return c_err
-			}
-			fmt.Printf("===\n%v\n", c.String())
-			return err
-		},
-	)
-}
-
-// Prints all UIDs of commits with messages that contain a given substring query.
-func printAllCommitIDsByMessage(query string) error {
-	found := false
-	err := filepath.WalkDir(
-		filepath.Join(".gitlet", "objects"),
-		func(path string, d fs.DirEntry, err error) error {
-			if d.IsDir() {
-				return nil
-			}
-			c, c_err := getCommit(d.Name())
-			if c_err != nil {
-				return c_err
-			}
-			if strings.Contains(c.Message, query) {
-				found = true
-				fmt.Printf("commit %v\n", c.UID)
-			}
-			return err
-		},
-	)
+func writeCommitBlob(c commit) error {
+	b, err := serialize[commit](c)
 	if err != nil {
 		return err
 	}
-	if !found {
-		fmt.Println("Found no commit with that message.")
+	return writeBlob("commit", b)
+}
+
+func writeFileBlob(file string) error {
+	b, err := readContents(file)
+	if err != nil {
+		return err
 	}
+	return writeBlob("file", b)
+}
+
+func getBlobHeader(file string) error {
+	f, err := os.Open(file)
+	if err != nil {
+		return err
+	}
+	reader := bufio.NewReader(f)
+	var delim byte = 0
+	reader.ReadString(delim)
+
 	return nil
+}
+
+func writeBlob(header string, b []byte) error {
+	payload := []any{header, blobHeaderDelim, b}
+	hash, err := getHash(payload)
+	if err != nil {
+		return err
+	}
+	blobFile := filepath.Join(".gitlet", "objects", hash)
+	return writeContents[any](blobFile, payload)
+}
+
+func readBlob(file string) (string, []byte, error) {
+	var header string
+	var contents []byte
+	b, err := readContents(file)
+	if err != nil {
+		return header, contents, err
+	}
+	splitIdx := slices.Index(b, []byte("\n")[0])
+	header = string(b[:splitIdx])
+	contents = b[splitIdx+1:]
+	return header, contents, nil
 }

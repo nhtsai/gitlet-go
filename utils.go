@@ -57,7 +57,7 @@ func restrictedDelete(file string) error {
 	return os.Remove(file)
 }
 
-func readContentsToBytes(file string) ([]byte, error) {
+func readContents(file string) ([]byte, error) {
 	fileBytes, err := os.ReadFile(file)
 	if err != nil {
 		return nil, fmt.Errorf("readContentsToBytes: %w", err)
@@ -65,8 +65,8 @@ func readContentsToBytes(file string) ([]byte, error) {
 	return bytes.TrimRight(fileBytes, "\n"), nil
 }
 
-func readContentsToString(file string) (string, error) {
-	fileBytes, err := readContentsToBytes(file)
+func readContentsAsString(file string) (string, error) {
+	fileBytes, err := readContents(file)
 	if err != nil {
 		return "", fmt.Errorf("readContentsToString: %w", err)
 	}
