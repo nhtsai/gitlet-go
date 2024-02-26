@@ -12,14 +12,13 @@ import (
 const blobHeaderDelim byte = 0
 
 type commit struct {
-	UID        string            // The SHA1 hash of commit and header metadata.
 	Message    string            // User supplied commit message.
 	Timestamp  int64             // When the commit was created in UNIX time in UTC.
-	FileToBlob map[string]string // Map of file names to blob UIDs tracked in the commit.
+	FileToBlob map[string]string // Map of file names to file blob UIDs tracked in the commit.
 	ParentUIDs [2]string         // SHA1 hash of the parent commit. Merge commits should have two parents.
 }
 
-func (c *commit) String() string {
+func (c *commit) String(hash string) string {
 	if c.ParentUIDs[1] != "" {
 		return fmt.Sprintf(
 			"commit %v\n"+
@@ -27,7 +26,7 @@ func (c *commit) String() string {
 				"Date: %v\n"+
 				"%v\n"+
 				"Merged %v into %v.\n",
-			c.UID,
+			hash,
 			c.ParentUIDs[0][:6], c.ParentUIDs[1][:6],
 			time.Unix(c.Timestamp, 0).Local().Format("Mon Jan 02 15:04:05 2006 -0700"),
 			c.Message,
@@ -38,17 +37,17 @@ func (c *commit) String() string {
 			"commit %v\n"+
 				"Date: %v\n"+
 				"%v\n",
-			c.UID,
+			hash,
 			time.Unix(c.Timestamp, 0).Local().Format("Mon Jan 02 15:04:05 2006 -0700"),
 			c.Message,
 		)
 	}
 }
 
-// Return a commit given a hash.
+// getCommit returns a commit given its hash.
 func getCommit(hash string) (commit, error) {
 	var c commit
-	commitData, err := readContents(filepath.Join(".gitlet", "objects", hash))
+	commitData, err := readContents(filepath.Join(objectsDir, hash))
 	if err != nil {
 		return c, err
 	}
@@ -61,7 +60,7 @@ func getCommit(hash string) (commit, error) {
 
 func getHeadCommit() (commit, error) {
 	var c commit
-	currentBranchFile, err := readContentsAsString(filepath.Join(".gitlet", "HEAD"))
+	currentBranchFile, err := readContentsAsString(headFile)
 	if err != nil {
 		return c, err
 	}
@@ -98,19 +97,17 @@ func getBlobHeader(file string) error {
 		return err
 	}
 	reader := bufio.NewReader(f)
-	var delim byte = 0
-	reader.ReadString(delim)
-
+	reader.ReadString(blobHeaderDelim)
 	return nil
 }
 
 func writeBlob(header string, b []byte) error {
-	payload := []any{header, blobHeaderDelim, b}
+	payload := []any{header, []byte{blobHeaderDelim}, b}
 	hash, err := getHash(payload)
 	if err != nil {
 		return err
 	}
-	blobFile := filepath.Join(".gitlet", "objects", hash)
+	blobFile := filepath.Join(objectsDir, hash)
 	return writeContents[any](blobFile, payload)
 }
 

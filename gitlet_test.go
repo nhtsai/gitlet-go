@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,12 +12,35 @@ func TestInit(t *testing.T) {
 	if err := newRepository(); err != nil {
 		t.Fatal(err)
 	}
-	// filepath.WalkDir(".gitlet", func(path string, d fs.DirEntry, err error) error {
-	// 	t.Log(d.IsDir(), d.Name(), path)
-	// 	return nil
-	// })
-	if _, err := os.Stat(".gitlet"); err != nil {
+	// check dirs and files
+	for _, d := range []string{gitletDir, objectsDir, branchHeadsDir, remotesDir, headFile, indexFile} {
+		if _, err := os.Stat(d); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// check initial commit
+	expectedHash := "7914794a7f0269202a9611b759450eb00d5dba47"
+	if _, err := os.Stat(filepath.Join(objectsDir, expectedHash)); err != nil {
 		t.Fatal(err)
+	}
+	// check HEAD file
+	expectedHeadFile := filepath.Join(branchHeadsDir, "main")
+	headBytes, err := os.ReadFile(headFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actualHeadFile := string(bytes.TrimRight(headBytes, "\n"))
+	if actualHeadFile != expectedHeadFile {
+		t.Fatalf("Incorrect head file contents, want %v, got %v\n", expectedHeadFile, actualHeadFile)
+	}
+	// check main branch
+	hashBytes, err := os.ReadFile(expectedHeadFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	actualBytes := string(bytes.TrimRight(hashBytes, "\n"))
+	if actualBytes != expectedHash {
+		t.Fatalf("Incorrect main branch head commit hash, want %v, got %v\n", expectedHash, actualBytes)
 	}
 }
 

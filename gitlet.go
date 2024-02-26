@@ -11,9 +11,8 @@ import (
 	"time"
 )
 
-const gitletDir string = ".gitlet"
-
 var (
+	gitletDir      string = ".gitlet"
 	objectsDir     string = filepath.Join(gitletDir, "objects")
 	branchHeadsDir string = filepath.Join(gitletDir, "refs", "heads")
 	remotesDir     string = filepath.Join(gitletDir, "remotes")
@@ -22,7 +21,7 @@ var (
 )
 
 func newRepository() error {
-	fi, err := os.Stat(".gitlet")
+	fi, err := os.Stat(gitletDir)
 	if (err == nil) && fi.IsDir() {
 		log.Fatal("A Gitlet version-control system already exists in the current directory.")
 	}
@@ -32,40 +31,37 @@ func newRepository() error {
 	os.MkdirAll(remotesDir, 0755)
 
 	// create initial commit
-	initialCommitUID, err := getHash[any](nil)
-	if err != nil {
-		return err
-	}
-	var initialCommit = new(commit)
-	initialCommit.UID = initialCommitUID
+	var initialCommit commit
 	initialCommit.Message = "initial commit"
 	initialCommit.Timestamp = time.Date(1970, time.January, 1, 0, 0, 0, 0, time.UTC).Unix()
 
-	// write initial commit blob
-	err = writeCommitBlob(*initialCommit)
+	b, err := serialize[commit](initialCommit)
+	if err != nil {
+		return err
+	}
+	blobData := []any{"commit", []byte{blobHeaderDelim}, b}
+	initialCommitHash, err := getHash(blobData)
+	if err != nil {
+		return err
+	}
+	err = writeContents[any](filepath.Join(objectsDir, initialCommitHash), blobData)
 	if err != nil {
 		return fmt.Errorf("initRepository: cannot write initial commit blob: %w", err)
 	}
 
 	// create main branch
 	mainBranchFile := filepath.Join(branchHeadsDir, "main")
-	err = writeContents(mainBranchFile, []string{initialCommitUID})
-	if err != nil {
+	if err = writeContents[string](mainBranchFile, []string{initialCommitHash}); err != nil {
 		return fmt.Errorf("initRepository: cannot create main branch: %w", err)
 	}
 
 	// set current branch to main branch
-	err = writeContents(
-		headFile,
-		[]string{mainBranchFile},
-	)
-	if err != nil {
+	if err = writeContents(headFile, []string{mainBranchFile}); err != nil {
 		return fmt.Errorf("initRepository: cannot set HEAD file: %w", err)
 	}
 
 	// set up index file
-	err = newIndex()
-	if err != nil {
+	if err = newIndex(); err != nil {
 		return fmt.Errorf("initRepository: cannot create index: %w", err)
 	}
 	return nil
@@ -132,7 +128,6 @@ func newCommit(message string) (commit, error) {
 		return c, err
 	}
 	// create commit
-	c.UID = "" // hash of all staged blobs?
 	c.Message = message
 	c.Timestamp = time.Now().UTC().Unix()
 	c.FileToBlob = make(map[string]string)
@@ -208,12 +203,14 @@ func printBranchLog() error {
 		return err
 	}
 	var curr = headCommit
+	var currHash = headCommitHash
 	for {
-		fmt.Printf("===\n%v\n", curr.String())
+		fmt.Printf("===\n%v\n", curr.String(currHash))
 		if curr.ParentUIDs[0] == "" {
 			break
 		}
-		curr, err = getCommit(curr.ParentUIDs[0])
+		currHash = curr.ParentUIDs[0]
+		curr, err = getCommit(currHash)
 		if err != nil {
 			return err
 		}
@@ -233,7 +230,7 @@ func printAllCommits() error {
 			if c_err != nil {
 				return c_err
 			}
-			fmt.Printf("===\n%v\n", c.String())
+			fmt.Printf("===\n%v\n", c.String(d.Name()))
 			return err
 		},
 	)
@@ -254,7 +251,7 @@ func printAllCommitIDsByMessage(query string) error {
 			}
 			if strings.Contains(c.Message, query) {
 				found = true
-				fmt.Printf("commit %v\n", c.UID)
+				fmt.Printf("commit %v\n", d.Name())
 			}
 			return err
 		},
