@@ -8,9 +8,9 @@ import (
 
 func TestIndex(t *testing.T) {
 	setupTestRepo(t)
-	var expectedIndex stagedFileMap = make(stagedFileMap)
-	expectedIndex["foo"] = stageMetadata{"123", time.Now().UTC().Unix(), 123}
-	expectedIndex["bar"] = stageMetadata{"456", time.Now().UTC().Unix(), 456}
+	var expectedIndex indexMap = make(indexMap)
+	expectedIndex["foo"] = indexMetadata{"123", time.Now().UTC().Unix(), 123}
+	expectedIndex["bar"] = indexMetadata{"456", time.Now().UTC().Unix(), 456}
 
 	if err := writeIndex(expectedIndex); err != nil {
 		t.Fatal(err)

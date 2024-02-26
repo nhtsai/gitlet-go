@@ -5,22 +5,22 @@ import (
 )
 
 // Metadata for staged files.
-type stageMetadata struct {
+type indexMetadata struct {
 	Hash     string
 	ModTime  int64
 	FileSize int64
 }
 
 // Map between filename and staging metadata.
-type stagedFileMap map[string]stageMetadata
+type indexMap map[string]indexMetadata
 
 // Read the index file and return the index map object.
-func readIndex() (stagedFileMap, error) {
+func readIndex() (indexMap, error) {
 	indexData, err := readContents(indexFile)
 	if err != nil {
 		return nil, fmt.Errorf("readIndex: cannot read index file: %w", err)
 	}
-	index, err := deserialize[stagedFileMap](indexData)
+	index, err := deserialize[indexMap](indexData)
 	if err != nil {
 		return nil, fmt.Errorf("readIndex: %w", err)
 	}
@@ -28,8 +28,8 @@ func readIndex() (stagedFileMap, error) {
 }
 
 // Write the index map object to the index file.
-func writeIndex(i stagedFileMap) error {
-	indexData, err := serialize[stagedFileMap](i)
+func writeIndex(i indexMap) error {
+	indexData, err := serialize[indexMap](i)
 	if err != nil {
 		return fmt.Errorf("writeIndex: %w", err)
 	}
@@ -41,7 +41,7 @@ func writeIndex(i stagedFileMap) error {
 
 // Clear the index file.
 func newIndex() error {
-	if err := writeIndex(make(stagedFileMap)); err != nil {
+	if err := writeIndex(make(indexMap)); err != nil {
 		return fmt.Errorf("newIndex: %w", err)
 	}
 	return nil
