@@ -17,7 +17,7 @@ func main() {
 		log.Fatal("Please enter a command.")
 	}
 
-	var command string = os.Args[1]
+	command := os.Args[1]
 	if command != "init" {
 		checkGitletInit()
 	}
@@ -32,7 +32,7 @@ func main() {
 		if err != nil {
 			cwd = "."
 		}
-		fmt.Printf("Initialized new Gitlet repository in %v\n", filepath.Join(cwd, ".gitlet"))
+		fmt.Printf("Initialized new Gitlet repository in %v\n", filepath.Join(cwd, gitletDir))
 	case "add":
 		validateArgs(os.Args, 2)
 		file := os.Args[2]
@@ -42,12 +42,7 @@ func main() {
 	case "commit":
 		validateArgs(os.Args, 2)
 		message := os.Args[2]
-		commit, err := newCommit(message)
-		if err != nil {
-			log.Fatal(err)
-		}
-		err = writeCommitBlob(commit)
-		if err != nil {
+		if err := newCommit(message); err != nil {
 			log.Fatal(err)
 		}
 	case "rm":
@@ -78,12 +73,12 @@ func main() {
 		// staged for removal
 		//  * look at currently tracked files that are not in working dir?
 
-		currentBranchFile, err := readContentsAsString(filepath.Join(".gitlet", "HEAD"))
+		currentBranchFile, err := readContentsAsString(headFile)
 		if err != nil {
 			log.Fatal(err)
 		}
 		currentBranch := filepath.Base(currentBranchFile)
-		branches, err := getFilenames(filepath.Join(".gitlet", "refs", "heads"))
+		branches, err := getFilenames(branchHeadsDir)
 		if err != nil {
 			log.Fatal(err)
 		}
@@ -236,7 +231,7 @@ func validateArgs(args []string, expected int) {
 }
 
 func checkGitletInit() {
-	_, err := os.Stat(".gitlet")
+	_, err := os.Stat(gitletDir)
 	if errors.Is(err, os.ErrNotExist) {
 		log.Fatal("Not in an initialized Gitlet directory.")
 	}

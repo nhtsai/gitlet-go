@@ -50,11 +50,10 @@ func TestAdd(t *testing.T) {
 	if err := os.WriteFile(testFile, []byte("This is a wug"), 0644); err != nil {
 		t.Fatal(err)
 	}
-
 	if err := stageFile(testFile); err != nil {
 		t.Fatal(err)
 	}
-
+	// check index for staged file
 	index, err := readIndex()
 	if err != nil {
 		t.Fatal(err)
@@ -63,14 +62,52 @@ func TestAdd(t *testing.T) {
 	if !ok {
 		t.Fatalf("Staged file not in index: %v\n", index)
 	}
-	_, err = os.Stat(filepath.Join(".gitlet", "objects", metadata.Hash))
-	if err != nil {
+	// check objects for staged file blob
+	if _, err = os.Stat(filepath.Join(objectsDir, metadata.Hash)); err != nil {
 		t.Fatal("Staged file blob not found.")
 	}
 
 }
 
-func TestCommit(t *testing.T) {}
+func TestCommit(t *testing.T) {
+	setupTestRepo(t)
+	testFile := "wug.txt"
+	if err := os.WriteFile(testFile, []byte("This is a wug"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := stageFile(testFile); err != nil {
+		t.Fatal(err)
+	}
+	// check index before commit
+	idx, err := readIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(idx) != 1 {
+		t.Fatal("File not added.")
+	}
+
+	if err := newCommit("add wug file"); err != nil {
+		t.Fatal(err)
+	}
+	objects, err := getFilenames(objectsDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// expected blobs: initial commit, wug file, wug commit
+	if len(objects) != 3 {
+		t.Fatalf("Commit and/or file blobs not found. Found %v", objects)
+	}
+	// check index after commit
+	idx, err = readIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(idx) != 0 {
+		t.Fatal("Index not cleared after commit.")
+	}
+}
 
 func TestRemove(t *testing.T) {}
 

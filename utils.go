@@ -74,7 +74,7 @@ func readContentsAsString(file string) (string, error) {
 }
 
 // Write all contents of an array of strings or byte arrays to a file.
-// If the file does not exist, it is created.
+// If the file does not exist, it is created. If the file does exist, it is overwritten.
 // Returns an error if the file is a directory.
 func writeContents[T any](file string, arr []T) error {
 	fileInfo, err := os.Stat(file)
@@ -84,7 +84,7 @@ func writeContents[T any](file string, arr []T) error {
 	if (err == nil) && fileInfo.IsDir() {
 		return fmt.Errorf("writeContents: cannot overwrite directory '%v'", file)
 	}
-	f, err := os.OpenFile(file, os.O_WRONLY|os.O_CREATE, 0644)
+	f, err := os.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
 	if err != nil {
 		return fmt.Errorf("writeContents: cannot open file '%v': %w", file, err)
 	}

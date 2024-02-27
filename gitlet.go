@@ -73,21 +73,19 @@ func newRepository() error {
 // skip the staging operation.
 // If the file is already staged and changed, overwrite the staged version.
 func stageFile(file string) error {
-	index, err := readIndex()
-	if err != nil {
-		return err
-	}
-
-	stagedInfo, isStaged := index[file]
 	wdInfo, err := os.Stat(file)
 	if err != nil {
 		return err
 	}
-
+	index, err := readIndex()
+	if err != nil {
+		return err
+	}
+	stagedMetadata, isStaged := index[file]
 	// working directory is identical to staged
 	if isStaged &&
-		(wdInfo.Size() == stagedInfo.FileSize) &&
-		(wdInfo.ModTime().Unix() == stagedInfo.ModTime) {
+		(wdInfo.Size() == stagedMetadata.FileSize) &&
+		(wdInfo.ModTime().Unix() == stagedMetadata.ModTime) {
 		log.Printf("File '%v' is already staged.\n", file)
 		return nil
 	}
@@ -97,56 +95,90 @@ func stageFile(file string) error {
 	if err != nil {
 		return err
 	}
-	wdHash, err := getHash[any]([]any{"string", wdContents})
+	wdBlobContents := []any{"file", []byte{blobHeaderDelim}, wdContents}
+	wdHash, err := getHash[any](wdBlobContents)
 	if err != nil {
 		return err
 	}
-
 	// working directory is identical to staged
-	if isStaged && (wdHash == stagedInfo.Hash) {
+	if isStaged && (wdHash == stagedMetadata.Hash) {
 		log.Printf("File '%v' is already staged.\n", file)
 		return nil
+	} else if isStaged {
+		// remove previously staged file that is now outdated
+		if err := os.Remove(filepath.Join(objectsDir, stagedMetadata.Hash)); err != nil {
+			return err
+		}
 	}
 
-	// stage file in working directory
-	fileBlobPath := filepath.Join(".gitlet", "objects", wdHash)
-	if err := writeContents(fileBlobPath, [][]byte{wdContents}); err != nil {
-		return err
+	// file is not already staged, so stage file in working directory
+	wdBlobFile := filepath.Join(objectsDir, wdHash)
+	if err = writeContents[any](wdBlobFile, wdBlobContents); err != nil {
+		return fmt.Errorf("stageFile: could not write staged file blob: %w", err)
 	}
 
 	// update file index
-	stagedInfo.Hash = wdHash
-	index[file] = stagedInfo
-	writeIndex(index)
+	index[file] = indexMetadata{wdHash, time.Now().Unix(), int64(len(wdContents))}
+	if err = writeIndex(index); err != nil {
+		return fmt.Errorf("stageFile: could not update file index: %w", err)
+	}
 	return nil
 }
 
-func newCommit(message string) (commit, error) {
-	var c commit
+func newCommit(message string) error {
 	index, err := readIndex()
 	if err != nil {
-		return c, err
+		return err
 	}
+	if len(index) == 0 {
+		return fmt.Errorf("no changes added to commit (use \"gitlet add\")")
+	}
+
 	// create commit
+	var c commit
 	c.Message = message
 	c.Timestamp = time.Now().UTC().Unix()
+	// create file to blob mapping
 	c.FileToBlob = make(map[string]string)
 	for k, v := range index {
 		c.FileToBlob[k] = v.Hash
 	}
-
-	// get current head commit hash
+	// set current head commit as parent
 	currentBranchFile, err := readContentsAsString(headFile)
 	if err != nil {
-		return c, err
+		return err
 	}
 	headCommitHash, err := readContentsAsString(currentBranchFile)
 	if err != nil {
-		return c, err
+		return err
 	}
 	c.ParentUIDs = [2]string{headCommitHash}
 
-	return c, nil
+	// serialize
+	b, err := serialize[commit](c)
+	if err != nil {
+		return fmt.Errorf("newCommit: could not serialize commit: %w", err)
+	}
+	// payload
+	blobContents := []any{"commit", []byte{blobHeaderDelim}, b}
+	commitHash, err := getHash[any](blobContents)
+	if err != nil {
+		return fmt.Errorf("newCommit: could not create commit hash: %w", err)
+	}
+	if err := writeContents(filepath.Join(objectsDir, commitHash), blobContents); err != nil {
+		return fmt.Errorf("newCommit: cannot write commit blob: %w", err)
+	}
+
+	// update branch
+	if err := writeContents[string](currentBranchFile, []string{commitHash}); err != nil {
+		return fmt.Errorf("newCommit: cannot update current branch file: %w", err)
+	}
+
+	// clear index
+	if err := newIndex(); err != nil {
+		return fmt.Errorf("newCommit: cannot clear index: %w", err)
+	}
+	return nil
 }
 
 // Removes a file from the staging area if it is currently staged.
