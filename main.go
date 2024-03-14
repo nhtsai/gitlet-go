@@ -194,15 +194,13 @@ func main() {
 	case "branch":
 		validateArgs(os.Args, 2)
 		branchName := os.Args[2]
-		err := addBranch(branchName)
-		if err != nil {
+		if err := addBranch(branchName); err != nil {
 			log.Fatal("Could not create new branch: ", err)
 		}
 	case "rm-branch":
 		validateArgs(os.Args, 2)
 		branchName := os.Args[2]
-		err := removeBranch(branchName)
-		if err != nil {
+		if err := removeBranch(branchName); err != nil {
 			log.Fatal("Could not remove branch: ", err)
 		}
 	case "reset":

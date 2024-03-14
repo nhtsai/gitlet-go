@@ -66,7 +66,6 @@ func TestAdd(t *testing.T) {
 	if _, err = os.Stat(filepath.Join(objectsDir, metadata.Hash)); err != nil {
 		t.Fatal("Staged file blob not found.")
 	}
-
 }
 
 func TestCommit(t *testing.T) {
@@ -121,9 +120,48 @@ func TestStatus(t *testing.T) {}
 
 func TestCheckout(t *testing.T) {}
 
-func TestBranch(t *testing.T) {}
+func TestBranch(t *testing.T) {
+	setupTestRepo(t)
+	testBranch := "foo"
+	if err := addBranch(testBranch); err != nil {
+		t.Fatal(err)
+	}
+	testBranchHeadCommitHash, err := readContentsAsString(filepath.Join(branchHeadsDir, testBranch))
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentBranchFile, err := readContentsAsString(headFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentBranchHeadCommitHash, err := readContentsAsString(currentBranchFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if testBranchHeadCommitHash != currentBranchHeadCommitHash {
+		t.Fatalf(
+			"New branch head does not match current branch head, want %v, got %v",
+			currentBranchHeadCommitHash, testBranchHeadCommitHash,
+		)
+	}
+}
 
-func TestRemoveBranch(t *testing.T) {}
+func TestRemoveBranch(t *testing.T) {
+	setupTestRepo(t)
+	// TODO: test remove current branch
+	// TODO: test remove non-existent branch
+	testBranch := "foo"
+	if err := addBranch(testBranch); err != nil {
+		t.Fatal(err)
+	}
+	if err := removeBranch(testBranch); err != nil {
+		t.Fatal(err)
+	}
+	// check if branch was deleted
+	if _, err := os.Stat(filepath.Join(branchHeadsDir, testBranch)); err == nil {
+		t.Fatalf("Branch '%v' was not removed: %v", testBranch, err)
+	}
+}
 
 func TestReset(t *testing.T) {}
 
