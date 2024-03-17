@@ -2,20 +2,24 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"time"
 )
 
 const blobHeaderDelim byte = 0
+const bufferSize int = 1024
 
 type commit struct {
 	Message    string            // User supplied commit message.
 	Timestamp  int64             // When the commit was created in UNIX time in UTC.
 	FileToBlob map[string]string // Map of file names to file blob UIDs tracked in the commit.
-	ParentUIDs [2]string         // SHA1 hash of the parent commit. Merge commits should have two parents.
+
+	// SHA1 hash of the parent commit. Merge commits should have two parents.
+	// Merge: current branch + target branch -> HEAD + arg
+	ParentUIDs [2]string
 }
 
 func (c *commit) String(hash string) string {
@@ -44,39 +48,25 @@ func (c *commit) String(hash string) string {
 	}
 }
 
-// getCommit returns a commit given its hash.
-func getCommit(hash string) (commit, error) {
-	var c commit
-	commitData, err := readContents(filepath.Join(objectsDir, hash))
-	if err != nil {
-		return c, err
-	}
-	c, err = deserialize[commit](commitData)
-	if err != nil {
-		return c, err
-	}
-	return c, nil
-}
-
 func getHeadCommit() (commit, error) {
 	var c commit
 	currentBranchFile, err := readContentsAsString(headFile)
 	if err != nil {
-		return c, err
+		return c, fmt.Errorf("getHeadCommit: %w", err)
 	}
 	headCommitHash, err := readContentsAsString(currentBranchFile)
 	if err != nil {
-		return c, err
+		return c, fmt.Errorf("getHeadCommit: %w", err)
 	}
 	c, err = getCommit(headCommitHash)
 	if err != nil {
-		return c, err
+		return c, fmt.Errorf("getHeadCommit: %w", err)
 	}
 	return c, nil
 }
 
 func writeCommitBlob(c commit) error {
-	b, err := serialize[commit](c)
+	b, err := serialize(c)
 	if err != nil {
 		return err
 	}
@@ -91,14 +81,50 @@ func writeFileBlob(file string) error {
 	return writeBlob("file", b)
 }
 
-func getBlobHeader(file string) error {
-	f, err := os.Open(file)
+// Get a blob's header given the hash of the blob.
+func parseBlobHeader(hash string) (string, error) {
+	f, err := os.Open(filepath.Join(objectsDir, hash))
 	if err != nil {
-		return err
+		return "", fmt.Errorf("parseBlobHeader: %w", err)
 	}
+	defer f.Close()
 	reader := bufio.NewReader(f)
-	reader.ReadString(blobHeaderDelim)
-	return nil
+	header, err := reader.ReadBytes(blobHeaderDelim)
+	if err != nil {
+		return "", err
+	}
+	header = bytes.TrimSuffix(header, []byte{blobHeaderDelim})
+	return string(header), f.Close()
+}
+
+// Get commit object given the hash of the commit blob.
+// Returns an error if the blob is not a commit blob.
+func getCommit(hash string) (commit, error) {
+	var c commit
+	f, err := os.Open(filepath.Join(objectsDir, hash))
+	if err != nil {
+		return c, fmt.Errorf("getCommitFromBlob: %w", err)
+	}
+	defer f.Close()
+	reader := bufio.NewReader(f)
+	headerBytes, err := reader.ReadBytes(blobHeaderDelim)
+	if err != nil {
+		return c, fmt.Errorf("getCommitFromBlob: %w", err)
+	}
+	header := string(bytes.TrimSuffix(headerBytes, []byte{blobHeaderDelim}))
+	if header != "commit" {
+		return c, fmt.Errorf("getCommitFromBlob: incorrect blob header, want 'commit', got '%v'", header)
+	}
+	contents := make([]byte, bufferSize)
+	bytesRead, err := reader.Read(contents)
+	if err != nil {
+		return c, fmt.Errorf("getCommitFromBlob: %w", err)
+	}
+	c, err = deserialize[commit](contents[:bytesRead])
+	if err != nil {
+		return c, fmt.Errorf("getCommitFromBlob: %w", err)
+	}
+	return c, f.Close()
 }
 
 func writeBlob(header string, b []byte) error {
@@ -109,17 +135,4 @@ func writeBlob(header string, b []byte) error {
 	}
 	blobFile := filepath.Join(objectsDir, hash)
 	return writeContents[any](blobFile, payload)
-}
-
-func readBlob(file string) (string, []byte, error) {
-	var header string
-	var contents []byte
-	b, err := readContents(file)
-	if err != nil {
-		return header, contents, err
-	}
-	splitIdx := slices.Index(b, []byte("\n")[0])
-	header = string(b[:splitIdx])
-	contents = b[splitIdx+1:]
-	return header, contents, nil
 }
