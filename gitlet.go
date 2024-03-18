@@ -20,6 +20,8 @@ var (
 	indexFile      string = filepath.Join(gitletDir, "INDEX")
 )
 
+// newRepository creates a new Gitlet repository with an initial commit and a main branch.
+// The repository stored in .gitlet contains the necessary directories and files for Gitlet.
 func newRepository() error {
 	fi, err := os.Stat(gitletDir)
 	if (err == nil) && fi.IsDir() {
@@ -35,23 +37,23 @@ func newRepository() error {
 	initialCommit.Message = "initial commit"
 	initialCommit.Timestamp = time.Date(1970, time.January, 1, 0, 0, 0, 0, time.UTC).Unix()
 
-	b, err := serialize[commit](initialCommit)
+	b, err := serialize(initialCommit)
 	if err != nil {
-		return err
+		return fmt.Errorf("initRepository: cannot serialize initial commit: %w", err)
 	}
 	blobData := []any{"commit", []byte{blobHeaderDelim}, b}
 	initialCommitHash, err := getHash(blobData)
 	if err != nil {
-		return err
+		return fmt.Errorf("initRepository: cannot get initial commit hash: %w", err)
 	}
-	err = writeContents[any](filepath.Join(objectsDir, initialCommitHash), blobData)
+	err = writeContents(filepath.Join(objectsDir, initialCommitHash), blobData)
 	if err != nil {
 		return fmt.Errorf("initRepository: cannot write initial commit blob: %w", err)
 	}
 
 	// create main branch
 	mainBranchFile := filepath.Join(branchHeadsDir, "main")
-	if err = writeContents[string](mainBranchFile, []string{initialCommitHash}); err != nil {
+	if err = writeContents(mainBranchFile, []string{initialCommitHash}); err != nil {
 		return fmt.Errorf("initRepository: cannot create main branch: %w", err)
 	}
 
@@ -67,22 +69,64 @@ func newRepository() error {
 	return nil
 }
 
-// Add a file to the staging area and index file.
-// If the file is not yet staged, stage it.
-// If the file is already staged and the working directory and index are identical,
-// skip the staging operation.
-// If the file is already staged and changed, overwrite the staged version.
+// stageFile stages a file to be committed.
+// If the file is already staged and identical to the file in the working directory, the staging operation is skipped.
+// If the file is already staged but modified in the working directory, the file is re-staged, overwriting the previously staged version.
+// If the file is already staged, not in the working directory, and tracked in the head commit, the file is already staged for deletion and staging is skipped.
+// If the file is not staged, not in the working directory, and tracked in the head commit, then it is staged for deletion.
+// If the file is not yet staged and modified, the file will be staged.
 func stageFile(file string) error {
-	wdInfo, err := os.Stat(file)
+	headCommit, err := getHeadCommit()
 	if err != nil {
-		return err
+		return fmt.Errorf("stageFile: cannot get head commit: %w", err)
 	}
+	trackedHash, isTracked := headCommit.FileToBlob[file]
+
 	index, err := readIndex()
 	if err != nil {
-		return err
+		return fmt.Errorf("stageFile: cannot read index file: %w", err)
 	}
 	stagedMetadata, isStaged := index[file]
-	// working directory is identical to staged
+
+	wdInfo, err := os.Stat(file)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			if isTracked {
+				if isStaged {
+					// path: not in WD (modified), is staged, is tracked
+					// skip, file is already staged for deletion
+					return nil
+				} else {
+					// path: not in WD (modified), not staged, is tracked
+					// stage file for deletion
+					index[file] = indexMetadata{"DELETE", time.Now().Unix(), 0}
+					if err := writeIndex(index); err != nil {
+						return fmt.Errorf("stageFile: could not stage file for deletion: %w", err)
+					}
+					return nil
+				}
+			} else {
+				if isStaged {
+					// remove staged blob
+					if err := os.Remove(filepath.Join(objectsDir, stagedMetadata.Hash)); err != nil {
+						return fmt.Errorf("stageFile: cannot delete old file blob: %w", err)
+					}
+					// delete from index
+					delete(index, file)
+					if err := writeIndex(index); err != nil {
+						return fmt.Errorf("stageFile: could not remove file from index: %w", err)
+					}
+					return nil
+				} else {
+					log.Fatal("File does not exist.")
+				}
+			}
+		} else {
+			return fmt.Errorf("stageFile: cannot stat file '%v': %w", file, err)
+		}
+	}
+
+	// compare metadata of WD and index
 	if isStaged &&
 		(wdInfo.Size() == stagedMetadata.FileSize) &&
 		(wdInfo.ModTime().Unix() == stagedMetadata.ModTime) {
@@ -90,30 +134,38 @@ func stageFile(file string) error {
 		return nil
 	}
 
-	// compare hashes
+	// compare hashes of WD and index
 	wdContents, err := readContents(file)
 	if err != nil {
-		return err
+		return fmt.Errorf("stageFile: cannot read file '%v': %w", file, err)
 	}
 	wdBlobContents := []any{"file", []byte{blobHeaderDelim}, wdContents}
-	wdHash, err := getHash[any](wdBlobContents)
+	wdHash, err := getHash(wdBlobContents)
 	if err != nil {
-		return err
+		return fmt.Errorf("stageFile: cannot get file hash: %w", err)
 	}
-	// working directory is identical to staged
 	if isStaged && (wdHash == stagedMetadata.Hash) {
 		log.Printf("File '%v' is already staged.\n", file)
 		return nil
-	} else if isStaged {
-		// remove previously staged file that is now outdated
+	}
+	// compare hashes of WD and head commit
+	if !isStaged && isTracked && (wdHash == trackedHash) {
+		log.Printf("No changes detected. Skipping staging...\n")
+		return nil
+	}
+
+	// file exists in WD and is modified
+
+	// remove previously staged file blob that is now outdated
+	if isStaged {
 		if err := os.Remove(filepath.Join(objectsDir, stagedMetadata.Hash)); err != nil {
-			return err
+			return fmt.Errorf("stageFile: cannot delete old file blob: %w", err)
 		}
 	}
 
-	// file is not already staged, so stage file in working directory
+	// file is not already staged or should be re-staged
 	wdBlobFile := filepath.Join(objectsDir, wdHash)
-	if err = writeContents[any](wdBlobFile, wdBlobContents); err != nil {
+	if err = writeContents(wdBlobFile, wdBlobContents); err != nil {
 		return fmt.Errorf("stageFile: could not write staged file blob: %w", err)
 	}
 

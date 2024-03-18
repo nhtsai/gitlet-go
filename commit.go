@@ -10,7 +10,7 @@ import (
 )
 
 const blobHeaderDelim byte = 0
-const bufferSize int = 1024
+const bufferSize int = 4096
 
 type commit struct {
 	Message    string            // User supplied commit message.
@@ -97,34 +97,47 @@ func parseBlobHeader(hash string) (string, error) {
 	return string(header), f.Close()
 }
 
+func readBlob(hash string) (string, []byte, error) {
+	var header string
+	var contents []byte
+	var err error
+	f, err := os.Open(filepath.Join(objectsDir, hash))
+	if err != nil {
+		return header, contents, fmt.Errorf("readBlob: %w", err)
+	}
+	defer f.Close()
+	reader := bufio.NewReader(f)
+
+	headerBytes, err := reader.ReadBytes(blobHeaderDelim)
+	if err != nil {
+		return header, contents, fmt.Errorf("readBlob: %w", err)
+	}
+	header = string(bytes.TrimSuffix(headerBytes, []byte{blobHeaderDelim}))
+
+	contents = make([]byte, bufferSize)
+	bytesRead, err := reader.Read(contents)
+	if err != nil {
+		return header, contents, fmt.Errorf("readBlob: %w", err)
+	}
+	return header, contents[:bytesRead], f.Close()
+}
+
 // Get commit object given the hash of the commit blob.
 // Returns an error if the blob is not a commit blob.
 func getCommit(hash string) (commit, error) {
 	var c commit
-	f, err := os.Open(filepath.Join(objectsDir, hash))
+	header, contents, err := readBlob(hash)
 	if err != nil {
 		return c, fmt.Errorf("getCommitFromBlob: %w", err)
 	}
-	defer f.Close()
-	reader := bufio.NewReader(f)
-	headerBytes, err := reader.ReadBytes(blobHeaderDelim)
-	if err != nil {
-		return c, fmt.Errorf("getCommitFromBlob: %w", err)
-	}
-	header := string(bytes.TrimSuffix(headerBytes, []byte{blobHeaderDelim}))
 	if header != "commit" {
 		return c, fmt.Errorf("getCommitFromBlob: incorrect blob header, want 'commit', got '%v'", header)
 	}
-	contents := make([]byte, bufferSize)
-	bytesRead, err := reader.Read(contents)
+	c, err = deserialize[commit](contents)
 	if err != nil {
 		return c, fmt.Errorf("getCommitFromBlob: %w", err)
 	}
-	c, err = deserialize[commit](contents[:bytesRead])
-	if err != nil {
-		return c, fmt.Errorf("getCommitFromBlob: %w", err)
-	}
-	return c, f.Close()
+	return c, nil
 }
 
 func writeBlob(header string, b []byte) error {
@@ -134,5 +147,5 @@ func writeBlob(header string, b []byte) error {
 		return err
 	}
 	blobFile := filepath.Join(objectsDir, hash)
-	return writeContents[any](blobFile, payload)
+	return writeContents(blobFile, payload)
 }
