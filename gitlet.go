@@ -250,37 +250,47 @@ func newCommit(message string) error {
 	return nil
 }
 
-// Removes a file from the staging area if it is currently staged.
-// If file is tracked in current commit, stage for removal (deletion), remove file from working directory
+// unstageFile removes a file from the staging area if it is currently staged.
+// If the file is also tracked in the current head commit, it will be staged for
+// deletion and removed from the working directory if not already removed.
 // Returns an error if the file is not staged or tracked by head commit.
 func unstageFile(file string) error {
 	index, err := readIndex()
 	if err != nil {
-		return err
+		return fmt.Errorf("unstageFile: %w", err)
 	}
-	_, isStaged := index[file]
+	stagedMetadata, isStaged := index[file]
 
-	currentBranchFile, err := readContentsAsString(headFile)
-	if err != nil {
-		return err
-	}
-	headCommitHash, err := readContentsAsString(currentBranchFile)
-	if err != nil {
-		return err
-	}
-	headCommitBytes, err := readContents(filepath.Join(objectsDir, headCommitHash))
-	if err != nil {
-		return err
-	}
-	headCommit, err := deserialize[commit](headCommitBytes)
-	if err != nil {
-		return err
+	// Unstage the file if it is currently staged for addition.
+	if isStaged {
+		if err := os.Remove(filepath.Join(objectsDir, stagedMetadata.Hash)); err != nil {
+			return fmt.Errorf("unstageFile: %w", err)
+		}
+		delete(index, file)
+		if err := writeIndex(index); err != nil {
+			return fmt.Errorf("unstageFile: %w", err)
+		}
 	}
 
+	headCommit, err := getHeadCommit()
+	if err != nil {
+		return fmt.Errorf("unstageFile: %w", err)
+	}
 	_, isTracked := headCommit.FileToBlob[file]
-
 	if !isStaged && !isTracked {
 		log.Fatal("No reason to remove the file.")
+	}
+
+	// Stage for deletion if the file is tracked in the head commit.
+	if isTracked {
+		// remove file from WD if present, do nothing if file does not exist
+		if err := os.Remove(file); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("unstageFile: %w", err)
+		}
+		// stage for deletion (stage a deleted file)
+		if err := stageFile(file); err != nil {
+			return fmt.Errorf("unstageFile: %w", err)
+		}
 	}
 	return nil
 }

@@ -40,9 +40,9 @@ func TestInit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	actualBytes := string(bytes.TrimRight(hashBytes, "\n"))
-	if actualBytes != expectedHash {
-		t.Fatalf("Incorrect main branch head commit hash, want %v, got %v\n", expectedHash, actualBytes)
+	actualHash := string(bytes.TrimRight(hashBytes, "\n"))
+	if actualHash != expectedHash {
+		t.Fatalf("Incorrect main branch head commit hash, want %v, got %v\n", expectedHash, actualHash)
 	}
 }
 
@@ -168,7 +168,35 @@ func TestNewCommit(t *testing.T) {
 	}
 }
 
-func TestRemove(t *testing.T) {
+func TestRemoveStaged(t *testing.T) {
+	setupTestRepo(t)
+	testFile := "wug.txt"
+	if err := os.WriteFile(testFile, []byte("This is a wug"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := stageFile(testFile); err != nil {
+		t.Fatal(err)
+	}
+	index, err := readIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(index) != 1 {
+		t.Fatal("Test file was not staged.")
+	}
+	if err := unstageFile(testFile); err != nil {
+		t.Fatal(err)
+	}
+	index, err = readIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(index) != 0 {
+		t.Fatal("Test file was not unstaged.")
+	}
+}
+
+func TestRemoveTracked(t *testing.T) {
 
 }
 
