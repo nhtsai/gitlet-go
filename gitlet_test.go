@@ -2,6 +2,8 @@ package main
 
 import (
 	"bytes"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
@@ -44,7 +46,7 @@ func TestInit(t *testing.T) {
 	}
 }
 
-func TestAdd(t *testing.T) {
+func TestAddFile(t *testing.T) {
 	setupTestRepo(t)
 	testFile := "wug.txt"
 	if err := os.WriteFile(testFile, []byte("This is a wug"), 0644); err != nil {
@@ -58,17 +60,75 @@ func TestAdd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	metadata, ok := index[testFile]
+	beforeMetadata, ok := index[testFile]
 	if !ok {
 		t.Fatalf("Staged file not in index: %v\n", index)
 	}
 	// check objects for staged file blob
-	if _, err = os.Stat(filepath.Join(objectsDir, metadata.Hash)); err != nil {
+	if _, err = os.Stat(filepath.Join(objectsDir, beforeMetadata.Hash)); err != nil {
 		t.Fatal("Staged file blob not found.")
+	}
+
+	// modify file and restage
+	f, err := os.OpenFile(testFile, os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString("!"); err != nil {
+		f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := stageFile(testFile); err != nil {
+		t.Fatal(err)
+	}
+
+	// after restaging, previously staged blob should not exist
+	if _, err := os.Stat(filepath.Join(objectsDir, beforeMetadata.Hash)); err == nil || !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal(err)
+	}
+
+	// restaged file should be in the index
+	index, err = readIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterMetadata, ok := index[testFile]
+	if !ok {
+		t.Fatalf("Restaged file not in index: %v\n", index)
+	}
+	if beforeMetadata.Hash == afterMetadata.Hash {
+		t.Fatal("Hashes are identical before and after staging changes.")
+	}
+	if _, err = os.Stat(filepath.Join(objectsDir, afterMetadata.Hash)); err != nil {
+		t.Fatal("Restaged file blob not found.")
+	}
+
+	// restaging a file after deletion
+	if err := os.Remove(testFile); err != nil {
+		t.Fatal(err)
+	}
+	if err := stageFile(testFile); err != nil {
+		t.Fatal(err)
+	}
+
+	// after staging, previously staged blob should not exist
+	if _, err := os.Stat(filepath.Join(objectsDir, afterMetadata.Hash)); err == nil || !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal(err)
+	}
+
+	index, err = readIndex()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := index[testFile]; ok {
+		t.Fatal("Restaging after deletion did not remove file from index.")
 	}
 }
 
-func TestCommit(t *testing.T) {
+func TestNewCommit(t *testing.T) {
 	setupTestRepo(t)
 	testFile := "wug.txt"
 	if err := os.WriteFile(testFile, []byte("This is a wug"), 0644); err != nil {
@@ -108,7 +168,9 @@ func TestCommit(t *testing.T) {
 	}
 }
 
-func TestRemove(t *testing.T) {}
+func TestRemove(t *testing.T) {
+
+}
 
 func TestLog(t *testing.T) {}
 
