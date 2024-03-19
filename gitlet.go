@@ -177,52 +177,69 @@ func stageFile(file string) error {
 	return nil
 }
 
+// newCommit creates a new commit.
+// Returns an error if commit message is empty or if no files are staged.
 func newCommit(message string) error {
+	if message == "" {
+		log.Fatal("Please enter a commit message.")
+	}
 	index, err := readIndex()
 	if err != nil {
-		return err
+		return fmt.Errorf("newCommit: %w", err)
 	}
 	if len(index) == 0 {
-		return fmt.Errorf("no changes added to commit (use \"gitlet add\")")
+		log.Fatal("No changes added to commit.")
 	}
 
-	// create commit
-	var c commit
-	c.Message = message
-	c.Timestamp = time.Now().UTC().Unix()
-	// create file to blob mapping
-	c.FileToBlob = make(map[string]string)
-	for k, v := range index {
-		c.FileToBlob[k] = v.Hash
+	c := commit{
+		Message:    message,
+		Timestamp:  time.Now().UTC().Unix(),
+		FileToBlob: make(map[string]string),
+		ParentUIDs: [2]string{},
 	}
+
 	// set current head commit as parent
 	currentBranchFile, err := readContentsAsString(headFile)
 	if err != nil {
-		return err
+		return fmt.Errorf("newCommit: %w", err)
 	}
 	headCommitHash, err := readContentsAsString(currentBranchFile)
 	if err != nil {
-		return err
+		return fmt.Errorf("newCommit: %w", err)
 	}
-	c.ParentUIDs = [2]string{headCommitHash}
+	c.ParentUIDs[0] = headCommitHash
 
-	// serialize
-	b, err := serialize[commit](c)
+	headCommit, err := getCommit(headCommitHash)
+	if err != nil {
+		return fmt.Errorf("newCommit: %w", err)
+	}
+	// create file to blob mapping from the previous commit
+	for file, blobUID := range headCommit.FileToBlob {
+		c.FileToBlob[file] = blobUID
+	}
+	// overwrite mapping with staged files
+	for file, metadata := range index {
+		if metadata.Hash != "DELETED" {
+			c.FileToBlob[file] = metadata.Hash
+		}
+	}
+
+	// write commit blob
+	contents, err := serialize(c)
 	if err != nil {
 		return fmt.Errorf("newCommit: could not serialize commit: %w", err)
 	}
-	// payload
-	blobContents := []any{"commit", []byte{blobHeaderDelim}, b}
-	commitHash, err := getHash[any](blobContents)
+	payload := []any{"commit", []byte{blobHeaderDelim}, contents}
+	commitHash, err := getHash(payload)
 	if err != nil {
 		return fmt.Errorf("newCommit: could not create commit hash: %w", err)
 	}
-	if err := writeContents(filepath.Join(objectsDir, commitHash), blobContents); err != nil {
+	if err := writeContents(filepath.Join(objectsDir, commitHash), payload); err != nil {
 		return fmt.Errorf("newCommit: cannot write commit blob: %w", err)
 	}
 
-	// update branch
-	if err := writeContents[string](currentBranchFile, []string{commitHash}); err != nil {
+	// update branch to new commit
+	if err := writeContents(currentBranchFile, []string{commitHash}); err != nil {
 		return fmt.Errorf("newCommit: cannot update current branch file: %w", err)
 	}
 
