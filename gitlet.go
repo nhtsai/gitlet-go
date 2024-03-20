@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 )
@@ -19,6 +20,8 @@ var (
 	headFile       string = filepath.Join(gitletDir, "HEAD")
 	indexFile      string = filepath.Join(gitletDir, "INDEX")
 )
+
+const stagedForRemovalMarker string = "DELETED"
 
 // newRepository creates a new Gitlet repository with an initial commit and a main branch.
 // The repository stored in .gitlet contains the necessary directories and files for Gitlet.
@@ -99,7 +102,7 @@ func stageFile(file string) error {
 				} else {
 					// path: not in WD (modified), not staged, is tracked
 					// stage file for deletion
-					index[file] = indexMetadata{"DELETE", time.Now().Unix(), 0}
+					index[file] = indexMetadata{stagedForRemovalMarker, time.Now().Unix(), 0}
 					if err := writeIndex(index); err != nil {
 						return fmt.Errorf("stageFile: could not stage file for deletion: %w", err)
 					}
@@ -219,7 +222,10 @@ func newCommit(message string) error {
 	}
 	// overwrite mapping with staged files
 	for file, metadata := range index {
-		if metadata.Hash != "DELETED" {
+		if metadata.Hash == stagedForRemovalMarker {
+			// remove file from commit if it is staged for deletion
+			delete(c.FileToBlob, file)
+		} else {
 			c.FileToBlob[file] = metadata.Hash
 		}
 	}
@@ -295,23 +301,19 @@ func unstageFile(file string) error {
 	return nil
 }
 
-// Print commit log from head of current branch to initial commit.
+// printBranchLog prints the commit log from head of current branch to initial commit.
 func printBranchLog() error {
 	headBranchFile, err := readContentsAsString(headFile)
 	if err != nil {
-		return err
+		return fmt.Errorf("printBranchLog: %w", err)
 	}
 	headCommitHash, err := readContentsAsString(headBranchFile)
 	if err != nil {
-		return err
+		return fmt.Errorf("printBranchLog: %w", err)
 	}
-	headCommitData, err := readContents(filepath.Join(objectsDir, headCommitHash))
+	headCommit, err := getCommit(headCommitHash)
 	if err != nil {
-		return err
-	}
-	headCommit, err := deserialize[commit](headCommitData)
-	if err != nil {
-		return err
+		return fmt.Errorf("printBranchLog: %w", err)
 	}
 	var curr = headCommit
 	var currHash = headCommitHash
@@ -320,10 +322,10 @@ func printBranchLog() error {
 		if curr.ParentUIDs[0] == "" {
 			break
 		}
-		currHash = curr.ParentUIDs[0]
+		currHash = curr.ParentUIDs[0] // traverse up first parent
 		curr, err = getCommit(currHash)
 		if err != nil {
-			return err
+			return fmt.Errorf("printBranchLog: %w", err)
 		}
 	}
 	return nil
@@ -376,7 +378,148 @@ func printAllCommitIDsByMessage(query string) error {
 	return nil
 }
 
-// TODO: status
+func printStatus() error {
+	fmt.Println("=== Branches ===")
+	currentBranchFile, err := readContentsAsString(headFile)
+	if err != nil {
+		return fmt.Errorf("printStatus: %w", err)
+	}
+	currentBranch := filepath.Base(currentBranchFile)
+	branches, err := getFilenames(branchHeadsDir)
+	if err != nil {
+		return fmt.Errorf("printStatus: %w", err)
+	}
+	slices.Sort(branches)
+	for _, branch := range branches {
+		if branch == currentBranch {
+			fmt.Print("*")
+		}
+		fmt.Println(branch)
+	}
+
+	index, err := readIndex()
+	if err != nil {
+		return fmt.Errorf("printStatus: %w", err)
+	}
+	var staged, removed []string
+
+	for k, v := range index {
+		if v.Hash == stagedForRemovalMarker {
+			removed = append(removed, k)
+		} else {
+			staged = append(staged, k)
+		}
+	}
+
+	fmt.Println("\n=== Staged Files ===")
+	slices.Sort(staged)
+	for _, file := range staged {
+		fmt.Println(file)
+	}
+
+	fmt.Println("\n=== Removed Files ===")
+	slices.Sort(removed)
+	for _, file := range removed {
+		fmt.Println(file)
+	}
+
+	fmt.Println("\n=== Modifications Not Staged For Commit ===")
+	/*
+		- tracked in current commit, changed in WD, but not staged
+			- iterate through tracked, check index if not staged, check WD if modified
+		- not staged for removal, but tracked in the current commit and deleted from the working directory.
+			- iterate through tracked, check index if not staged, check WD if deleted
+		- staged for addition, different contents (hash) than WD
+			- iterate through index (non deletion), check WD if modified
+		- staged for addition, deleted in WD
+			- iterate through index (non deletion), check WD if deleted
+
+	*/
+
+	// files in head commit that are not in wd and not staged
+	headCommit, err := getHeadCommit()
+	if err != nil {
+		return fmt.Errorf("printStatus: %w", err)
+	}
+	var unstagedChanges []string
+	// check tracked but unstaged files
+	for trackedFile, trackedHash := range headCommit.FileToBlob {
+		_, isStaged := index[trackedFile]
+		if isStaged {
+			continue
+		}
+		contents, err := readContents(trackedFile)
+		// check if deleted
+		if errors.Is(err, fs.ErrNotExist) {
+			unstagedChanges = append(unstagedChanges, fmt.Sprintf("%v (deleted)", trackedFile))
+		} else if err != nil {
+			return fmt.Errorf("printStatus: %w", err)
+		} else {
+			// check if modified
+			payload := []any{"file", []byte{blobHeaderDelim}, contents}
+			wdHash, err := getHash(payload)
+			if err != nil {
+				return fmt.Errorf("printStatus: %w", err)
+			}
+			if wdHash != trackedHash {
+				unstagedChanges = append(unstagedChanges, fmt.Sprintf("%v (modified)", trackedFile))
+			}
+		}
+	}
+
+	// check staged files
+	for stagedFile, stagedMetadata := range index {
+		if stagedMetadata.Hash == stagedForRemovalMarker {
+			continue
+		}
+		contents, err := readContents(stagedFile)
+		// check if deleted
+		if errors.Is(err, fs.ErrNotExist) {
+			unstagedChanges = append(unstagedChanges, fmt.Sprintf("%v (deleted)", stagedFile))
+		} else if err != nil {
+			return fmt.Errorf("printStatus: %w", err)
+		} else {
+			// check if modified
+			payload := []any{"file", []byte{blobHeaderDelim}, contents}
+			wdHash, err := getHash(payload)
+			if err != nil {
+				return fmt.Errorf("printStatus: %w", err)
+			}
+			if wdHash != stagedMetadata.Hash {
+				unstagedChanges = append(unstagedChanges, fmt.Sprintf("%v (modified)", stagedFile))
+			}
+		}
+
+	}
+	slices.Sort(unstagedChanges)
+	for _, file := range unstagedChanges {
+		fmt.Println(file)
+	}
+
+	fmt.Println("\n=== Untracked Files ===")
+	var untracked []string
+	// files in wd that are not tracked or staged
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("printStatus: %w", err)
+	}
+	wdFiles, err := getFilenames(cwd)
+	if err != nil {
+		return fmt.Errorf("printStatus: %w", err)
+	}
+	for _, file := range wdFiles {
+		_, isStaged := index[file]
+		_, isTracked := headCommit.FileToBlob[file]
+		if !isStaged && !isTracked {
+			untracked = append(untracked, file)
+		}
+	}
+	slices.Sort(untracked)
+	for _, file := range untracked {
+		fmt.Println(file)
+	}
+	return nil
+}
 
 // TODO: checkout
 

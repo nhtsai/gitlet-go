@@ -48,6 +48,18 @@ func (c *commit) String(hash string) string {
 	}
 }
 
+func getHeadCommitHash() (string, error) {
+	currentBranchFile, err := readContentsAsString(headFile)
+	if err != nil {
+		return "", fmt.Errorf("getHeadCommitHash: %w", err)
+	}
+	headCommitHash, err := readContentsAsString(currentBranchFile)
+	if err != nil {
+		return "", fmt.Errorf("getHeadCommitHash: %w", err)
+	}
+	return headCommitHash, nil
+}
+
 func getHeadCommit() (commit, error) {
 	var c commit
 	currentBranchFile, err := readContentsAsString(headFile)
@@ -81,7 +93,7 @@ func writeFileBlob(file string) error {
 	return writeBlob("file", b)
 }
 
-// Get a blob's header given the hash of the blob.
+// parseBlobHeader returns a blob's header given the hash of the blob.
 func parseBlobHeader(hash string) (string, error) {
 	f, err := os.Open(filepath.Join(objectsDir, hash))
 	if err != nil {
@@ -97,6 +109,7 @@ func parseBlobHeader(hash string) (string, error) {
 	return string(header), f.Close()
 }
 
+// readBlob returns the header and contents of a blob given the hash of the blob.
 func readBlob(hash string) (string, []byte, error) {
 	var header string
 	var contents []byte

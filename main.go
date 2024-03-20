@@ -69,94 +69,9 @@ func main() {
 		}
 	case "status":
 		validateArgs(os.Args, 1)
-
-		// staged for removal
-		//  * look at currently tracked files that are not in working dir?
-
-		currentBranchFile, err := readContentsAsString(headFile)
-		if err != nil {
+		if err := printStatus(); err != nil {
 			log.Fatal(err)
 		}
-		currentBranch := filepath.Base(currentBranchFile)
-		branches, err := getFilenames(branchHeadsDir)
-		if err != nil {
-			log.Fatal(err)
-		}
-		fmt.Println("=== Branches ===")
-		for _, b := range branches {
-			if b == currentBranch {
-				fmt.Print("*")
-			}
-			fmt.Println(b)
-		}
-
-		// staged
-		index, err := readIndex()
-		if err != nil {
-			log.Fatal(err)
-		}
-		for k := range index {
-			fmt.Println(k)
-		}
-
-		/*
-			in WD only
-			- Untracked
-
-			in HEAD only
-			- removed (not staged, not in WD)
-
-			in Index and WD
-			- staged   (same in WD)    == Index, WD, and Head
-			- modified (changed in WD) == Index, WD, and Head
-			- modified (deleted in WD) == in Index and Head, Index only
-
-			in WD and Head
-			- modified, unstaged (changed in WD)
-		*/
-		// var modified, untracked []string
-		// filepath.WalkDir(".", func(path string, d fs.DirEntry, err error) error {
-		// 	if d.IsDir() {
-		// 		if d.Name() == ".git" || d.Name() == ".gitlet" {
-		// 			return fs.SkipDir
-		// 		}
-		// 		return nil
-		// 	}
-
-		// 	modified = append(modified, path)
-		// 	return nil
-		// })
-
-		// for _, m := range modified {
-		// 	fmt.Println(m)
-		// }
-		// fmt.Println(untracked)
-
-		fmt.Println("\n=== Staged Files ===")
-
-		fmt.Println("\n=== Removed Files ===")
-		// files in head commit that are not in wd and not staged
-		headCommit, err := getHeadCommit()
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		for trackedFile := range headCommit.FileToBlob {
-			_, isStaged := index[trackedFile]
-			if !isStaged {
-				fmt.Println(trackedFile)
-			}
-		}
-
-		fmt.Println("\n=== Modifications Not Staged For Commit ===")
-		// modified, not staged
-		//  * tracked in current commit, changed in CWD, but not staged
-		//  * staged for addition, different contents (hash) than CWD
-		//  * staged for addition, deleted in CWD
-
-		fmt.Println("\n=== Untracked Files ===")
-		// files in wd that are not in latest commit
-
 	case "checkout":
 		// checkout -- filename
 		// filename := os.Args[3]
