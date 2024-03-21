@@ -4,39 +4,54 @@ import (
 	"bytes"
 	"errors"
 	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 )
 
-func mkTempDir(dir string) error {
+func mkTestDir(t *testing.T, dir string) {
+	t.Helper()
 	err1 := os.Mkdir(dir, 0755)
 	err2 := os.Chmod(dir, 0755)
 	if err := errors.Join(err1, err2); err != nil {
-		return err
+		t.FailNow()
 	}
-	return nil
 }
 
 func setupTempDir(t *testing.T) {
+	t.Helper()
 	if err := os.Chdir(t.TempDir()); err != nil {
-		t.Fatal(err)
+		t.FailNow()
 	}
 }
 
 func setupTestRepo(t *testing.T) {
+	t.Helper()
 	setupTempDir(t)
 	if err := newRepository(); err != nil {
-		t.Fatal(err)
+		t.FailNow()
 	}
 }
 
 func TestGetFilenames(t *testing.T) {
-	files, err := getFilenames(".")
+	setupTestRepo(t)
+	wd, err := os.Getwd()
 	if err != nil {
-		t.Errorf("Could not read directory %v: %v", ".", err)
+		t.Error(err)
 	}
-	for _, f := range files {
-		t.Log(f)
+	expected := []string{"bar.js", "foo.go", "wug.txt"}
+	for _, testFile := range expected {
+		if _, err := os.Create(filepath.Join(wd, testFile)); err != nil {
+			t.Error(err)
+		}
+	}
+	files, err := getFilenames(wd)
+	if err != nil {
+		t.Errorf("Could not read directory %v: %v", wd, err)
+	}
+	if slices.Compare(files, expected) != 0 {
+		t.Fail()
+		t.Logf("Incorrect filenames returned, want %v, got %v", expected, files)
 	}
 }
 
@@ -58,10 +73,9 @@ func TestGetHash(t *testing.T) {
 func TestRestrictedDeleteDirectory(t *testing.T) {
 	setupTestRepo(t)
 	testDir := "foo"
-	os.Mkdir(testDir, 0755)
-	err := restrictedDelete(testDir)
-	if err == nil {
-		t.Fatalf(`restrictedDelete("%v") occurred, want fail.`, testDir)
+	mkTestDir(t, testDir)
+	if err := restrictedDelete(testDir); err == nil {
+		t.Fatalf("restrictedDelete('%v') occurred, want fail.", testDir)
 	}
 }
 
@@ -69,22 +83,25 @@ func TestRestrictedDeleteFileNotExist(t *testing.T) {
 	setupTestRepo(t)
 	testFile := "baz.go"
 	err := restrictedDelete(testFile)
-	if err == nil {
-		t.Fatalf(`restrictedDelete("%v") occurred, want fail.`, testFile)
+	if err != nil {
+		t.Fatalf("restrictedDelete('%v') occurred, should do nothing.", testFile)
 	}
 }
 
 func TestRestrictedDeleteFile(t *testing.T) {
 	setupTestRepo(t)
-	testFile := "baz.go"
+	mkTestDir(t, "foo")
+	mkTestDir(t, filepath.Join("foo", "bar"))
+	testFile := filepath.Join("foo", "bar", "baz.go")
 	f, err := os.Create(testFile)
 	if err != nil {
-		t.Errorf("Could not create test file: %v", err)
+		t.Fatalf("Could not create test file: %v", err)
 	}
-	f.Close()
-	err = restrictedDelete(testFile)
-	if err != nil {
-		t.Fatalf(`restrictedDelete("%v") did not occur as expected.`, testFile)
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := restrictedDelete(testFile); err != nil {
+		t.Fatalf("restrictedDelete('%v') did not occur as expected", testFile)
 	}
 }
 
@@ -93,12 +110,10 @@ func TestReadContentsToBytes(t *testing.T) {
 	testFile := "foo.txt"
 	expected := []byte("Hello, world!")
 	os.WriteFile(testFile, expected, 0644)
-
 	actual, err := readContents(testFile)
 	if err != nil {
 		t.Fatalf("Could not read test file: %v", err)
 	}
-
 	if slices.Compare(actual, expected) != 0 {
 		t.Fatal("Wrong contents read from test file.")
 	}
@@ -109,12 +124,10 @@ func TestReadContentsToString(t *testing.T) {
 	testFile := "foo.txt"
 	expected := []byte("Hello, world!")
 	os.WriteFile(testFile, expected, 0644)
-
 	actual, err := readContentsAsString(testFile)
 	if err != nil {
 		t.Fatalf("Could not read test file: %v", err)
 	}
-
 	if actual != string(expected) {
 		t.Fatalf(`Wrong contents read from test file.`)
 	}
@@ -128,7 +141,6 @@ func TestWriteContents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Could not write to test file: %v", err)
 	}
-
 	actual, err := os.ReadFile(testFile)
 	if err != nil {
 		t.Fatalf("Could not read test file: %v", err)
@@ -141,7 +153,7 @@ func TestWriteContents(t *testing.T) {
 
 func TestSerialization(t *testing.T) {
 	expected := "This is a wug."
-	b, err := serialize[string](expected)
+	b, err := serialize(expected)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,38 +165,3 @@ func TestSerialization(t *testing.T) {
 		t.Fatalf("Incorrect serialization/deserialization: want %v, got %v", expected, actual)
 	}
 }
-
-// func TestCreateBlobFromFile(t *testing.T) {
-// 	setupTempDir(t)
-// 	testFile := "foo.txt"
-// 	expected := []byte("This is a wug.")
-// 	err := os.WriteFile(testFile, expected, 0644)
-// 	if err != nil {
-// 		t.Error(err)
-// 	}
-
-// 	err = os.MkdirAll(filepath.Join(".gitlet", "blob"), 0755)
-// 	if err != nil {
-// 		t.Error(err)
-// 	}
-// 	// needs execute permission
-// 	err = os.Chmod(filepath.Join(".gitlet", "blob"), 0755)
-// 	if err != nil {
-// 		t.Errorf("Could not set .gitlet directory perms: %v", err)
-// 	}
-
-// 	err = createBlobFromFile(testFile)
-// 	if err != nil {
-// 		t.Error(err)
-// 	}
-// 	files, err := os.ReadDir(filepath.Join(".gitlet", "blob"))
-// 	if err != nil {
-// 		t.Fatal(err)
-// 	}
-// 	for _, file := range files {
-// 		if file.Name() == "b0438c11aca0470310517c59f2cbd763d1e5cbb4" {
-// 			return
-// 		}
-// 	}
-// 	t.Fail()
-// }

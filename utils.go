@@ -15,6 +15,7 @@ import (
 	"slices"
 )
 
+// getHash generates a 40-character SHA1 hash given an array of bytes and strings.
 func getHash[T any](arr []T) (string, error) {
 	h := sha1.New()
 	for _, a := range arr {
@@ -36,35 +37,48 @@ func getHash[T any](arr []T) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
+// restrictedDelete removes a file if the working directory contains a .gitlet directory.
+// This function is used to safely delete user files within a Gitlet repository and
+// should be called from the root directory of the Gitlet repository.
+// Does nothing if file does not exist.
 func restrictedDelete(file string) error {
-	// check if file in dir that contains .gitlet
-	_, err := os.Stat(filepath.Join(filepath.Dir(file), ".gitlet"))
-	inGitletSubDir := slices.Contains(filepath.SplitList(file), ".gitlet")
-	if errors.Is(err, os.ErrNotExist) && !inGitletSubDir {
-		log.Fatal("Not in an initialized Gitlet directory: ", filepath.Dir(file))
+	wd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("restrictedDelete: %w", err)
+	}
+	_, err = os.Stat(filepath.Join(wd, gitletDir))
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			log.Fatalf("Not in an initialized Gitlet repository.")
+		}
+		return fmt.Errorf("restrictedDelete: %w", err)
 	}
 	fileInfo, err := os.Stat(file)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			return fmt.Errorf("restrictedDelete: %w", err)
-		} else {
-			return err
+			return nil
 		}
+		return fmt.Errorf("restrictedDelete: %w", err)
 	}
 	if fileInfo.IsDir() {
 		return fmt.Errorf("restrictedDelete: cannot delete directory '%v'", file)
 	}
-	return os.Remove(file)
+	if err := os.Remove(file); err != nil {
+		return fmt.Errorf("restrictedDelete: %w", err)
+	}
+	return nil
 }
 
+// readContents returns the contents of a file as bytes.
 func readContents(file string) ([]byte, error) {
 	fileBytes, err := os.ReadFile(file)
 	if err != nil {
-		return nil, fmt.Errorf("readContentsToBytes: %w", err)
+		return nil, fmt.Errorf("readContents: %w", err)
 	}
 	return bytes.TrimRight(fileBytes, "\n"), nil
 }
 
+// readContentsAsString returns the contents of a file as a string.
 func readContentsAsString(file string) (string, error) {
 	fileBytes, err := readContents(file)
 	if err != nil {
@@ -73,7 +87,7 @@ func readContentsAsString(file string) (string, error) {
 	return string(fileBytes), nil
 }
 
-// Write all contents of an array of strings or byte arrays to a file.
+// writeContents writes all contents of an array of strings or byte arrays to a file.
 // If the file does not exist, it is created. If the file does exist, it is overwritten.
 // Returns an error if the file is a directory.
 func writeContents[T any](file string, arr []T) error {
@@ -88,15 +102,16 @@ func writeContents[T any](file string, arr []T) error {
 	if err != nil {
 		return fmt.Errorf("writeContents: cannot open file '%v': %w", file, err)
 	}
+	defer f.Close()
 	for _, a := range arr {
 		switch t := any(a).(type) {
 		case string:
 			if _, err := f.WriteString(t); err != nil {
-				return err
+				return fmt.Errorf("writeContents: cannot write string '%v': %w", t, err)
 			}
 		case []byte:
 			if _, err := f.Write(t); err != nil {
-				return err
+				return fmt.Errorf("writeContents: cannot write bytes '%v': %w", string(t), err)
 			}
 		default:
 			return fmt.Errorf("writeContents: %v is not an array of strings or byte arrays", t)
@@ -109,7 +124,7 @@ func writeContents[T any](file string, arr []T) error {
 	return f.Close()
 }
 
-// Return a sorted list of filenames in the directory.
+// getFilenames returns a sorted list of filenames in the directory.
 func getFilenames(dir string) ([]string, error) {
 	files, err := os.ReadDir(dir)
 	if err != nil {
@@ -125,7 +140,7 @@ func getFilenames(dir string) ([]string, error) {
 	return filenames, nil
 }
 
-// serialize object and return as byte array
+// serialize encodes an object as bytes.
 func serialize[T any](obj T) ([]byte, error) {
 	b, err := json.Marshal(obj)
 	if err != nil {
@@ -134,6 +149,7 @@ func serialize[T any](obj T) ([]byte, error) {
 	return b, nil
 }
 
+// deserialize decodes bytes as an object.
 func deserialize[T any](b []byte) (T, error) {
 	var obj T
 	if err := json.Unmarshal(b, &obj); err != nil {
@@ -141,91 +157,3 @@ func deserialize[T any](b []byte) (T, error) {
 	}
 	return obj, nil
 }
-
-// func serialize[T any](obj T) ([]byte, error) {
-// 	buf := bytes.Buffer{}
-// 	enc := gob.NewEncoder(&buf)
-// 	err := enc.Encode(obj)
-// 	if err != nil {
-// 		return nil, fmt.Errorf("serialize: %w", err)
-// 	}
-// 	return buf.Bytes(), nil
-// }
-
-// func deserialize[T any](b []byte) (T, error) {
-// 	var obj T
-// 	buf := bytes.Buffer{}
-// 	_, err := buf.Write(b)
-// 	if err != nil {
-// 		return obj, fmt.Errorf("deserialize: write byte stream: %w", err)
-// 	}
-// 	dec := gob.NewDecoder(&buf)
-// 	err = dec.Decode(&obj)
-// 	if err != nil {
-// 		return obj, fmt.Errorf("deserialize: decode byte stream: %w", err)
-// 	}
-// 	return obj, nil
-// }
-
-// func serialize[T any](obj T) ([]byte, error) {
-// 	buf := new(bytes.Buffer)
-// 	err := binary.Write(buf, binary.LittleEndian, obj)
-// 	if err != nil {
-// 		return nil, fmt.Errorf("serialize: %w", err)
-// 	}
-// 	return buf.Bytes(), nil
-// }
-
-// func deserialize[T any](b []byte) (T, error) {
-// 	var obj T
-// 	buf := bytes.NewReader(b)
-// 	err := binary.Read(buf, binary.LittleEndian, &obj)
-// 	if err != nil {
-// 		return obj, fmt.Errorf("deserialize: %w", err)
-// 	}
-// 	return obj, nil
-// }
-
-// func createBlobFromFile(file string, prefix string) error {
-// 	// read file contents
-// 	contents, err := readContentsToBytes(file)
-// 	if err != nil {
-// 		return fmt.Errorf("createBlobFromFile: %w", err)
-// 	}
-// 	// get hash
-// 	hash, err := getHash[any]([]any{prefix, contents})
-// 	if err != nil {
-// 		return fmt.Errorf("createBlobFromFile: %w", err)
-// 	}
-// 	// write to .gitlet/blob/
-// 	blobPath := filepath.Join(filepath.Dir(file), ".gitlet", "blob", hash)
-// 	return writeContents[[]byte](blobPath, [][]byte{contents})
-// }
-
-// need serialize: commit blob, index,
-// need header: commit blob, file blob
-
-// func writeBlob[T any](header string, obj T) error {
-// 	var contents []byte
-// 	var err error
-// 	switch t := any(obj).(type) {
-// 	case commit:
-// 		contents, err = serialize[commit](t)
-// 		if err != nil {
-// 			return err
-// 		}
-// 	case []byte:
-// 		contents = t
-// 	default:
-// 		return errors.New("cannot write blob")
-// 	}
-// 	payload := []any{header, fmt.Sprint(len(content)), byte(0), content}
-// 	getHash[any](payload)
-// 	writeContents("blob", payload)
-// 	return nil
-// }
-
-// func readBlob[T any](content []byte) (T, error) {
-// 	var obj T
-// 	return obj, nil
-// }
