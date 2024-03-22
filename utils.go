@@ -117,10 +117,6 @@ func writeContents[T any](file string, arr []T) error {
 			return fmt.Errorf("writeContents: %v is not an array of strings or byte arrays", t)
 		}
 	}
-	_, err = f.WriteString("\n")
-	if err != nil {
-		return fmt.Errorf("writeContents: cannot write newline: %w", err)
-	}
 	return f.Close()
 }
 
