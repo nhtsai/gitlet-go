@@ -25,7 +25,7 @@ func TestCommitString(t *testing.T) {
 
 func TestParseBlobHeader(t *testing.T) {
 	setupTestRepo(t)
-	header, err := parseBlobHeader("7914794a7f0269202a9611b759450eb00d5dba47")
+	header, err := parseBlobHeader(initialCommitHash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -36,7 +36,7 @@ func TestParseBlobHeader(t *testing.T) {
 
 func TestGetCommit(t *testing.T) {
 	setupTestRepo(t)
-	initialCommit, err := getCommit("7914794a7f0269202a9611b759450eb00d5dba47")
+	initialCommit, err := getCommit(initialCommitHash)
 	if err != nil {
 		t.Fatal(err)
 	}

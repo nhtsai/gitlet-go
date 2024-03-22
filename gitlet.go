@@ -40,16 +40,16 @@ func newRepository() error {
 	initialCommit.Message = "initial commit"
 	initialCommit.Timestamp = time.Date(1970, time.January, 1, 0, 0, 0, 0, time.UTC).Unix()
 
-	b, err := serialize(initialCommit)
+	contents, err := serialize(initialCommit)
 	if err != nil {
 		return fmt.Errorf("initRepository: cannot serialize initial commit: %w", err)
 	}
-	blobData := []any{"commit", []byte{blobHeaderDelim}, b}
-	initialCommitHash, err := getHash(blobData)
+	payload := []any{"commit", []byte{blobHeaderDelim}, contents}
+	initialCommitHash, err := getHash(payload)
 	if err != nil {
 		return fmt.Errorf("initRepository: cannot get initial commit hash: %w", err)
 	}
-	err = writeContents(filepath.Join(objectsDir, initialCommitHash), blobData)
+	err = writeContents(filepath.Join(objectsDir, initialCommitHash), payload)
 	if err != nil {
 		return fmt.Errorf("initRepository: cannot write initial commit blob: %w", err)
 	}
@@ -73,6 +73,7 @@ func newRepository() error {
 }
 
 // stageFile stages a file to be committed.
+//
 // If the file is already staged and identical to the file in the working directory, the staging operation is skipped.
 // If the file is already staged but modified in the working directory, the file is re-staged, overwriting the previously staged version.
 // If the file is already staged, not in the working directory, and tracked in the head commit, the file is already staged for deletion and staging is skipped.
@@ -111,7 +112,7 @@ func stageFile(file string) error {
 			} else {
 				if isStaged {
 					// remove staged blob
-					if err := os.Remove(filepath.Join(objectsDir, stagedMetadata.Hash)); err != nil {
+					if err := restrictedDelete(filepath.Join(objectsDir, stagedMetadata.Hash)); err != nil {
 						return fmt.Errorf("stageFile: cannot delete old file blob: %w", err)
 					}
 					// delete from index
@@ -142,8 +143,8 @@ func stageFile(file string) error {
 	if err != nil {
 		return fmt.Errorf("stageFile: cannot read file '%v': %w", file, err)
 	}
-	wdBlobContents := []any{"file", []byte{blobHeaderDelim}, wdContents}
-	wdHash, err := getHash(wdBlobContents)
+	wdBlobPayload := []any{"file", []byte{blobHeaderDelim}, wdContents}
+	wdHash, err := getHash(wdBlobPayload)
 	if err != nil {
 		return fmt.Errorf("stageFile: cannot get file hash: %w", err)
 	}
@@ -157,18 +158,18 @@ func stageFile(file string) error {
 		return nil
 	}
 
-	// file exists in WD and is modified
+	// path: file exists in WD and is modified
 
 	// remove previously staged file blob that is now outdated
 	if isStaged {
-		if err := os.Remove(filepath.Join(objectsDir, stagedMetadata.Hash)); err != nil {
+		if err := restrictedDelete(filepath.Join(objectsDir, stagedMetadata.Hash)); err != nil {
 			return fmt.Errorf("stageFile: cannot delete old file blob: %w", err)
 		}
 	}
 
 	// file is not already staged or should be re-staged
 	wdBlobFile := filepath.Join(objectsDir, wdHash)
-	if err = writeContents(wdBlobFile, wdBlobContents); err != nil {
+	if err = writeContents(wdBlobFile, wdBlobPayload); err != nil {
 		return fmt.Errorf("stageFile: could not write staged file blob: %w", err)
 	}
 
@@ -269,7 +270,7 @@ func unstageFile(file string) error {
 
 	// Unstage the file if it is currently staged for addition.
 	if isStaged {
-		if err := os.Remove(filepath.Join(objectsDir, stagedMetadata.Hash)); err != nil {
+		if err := restrictedDelete(filepath.Join(objectsDir, stagedMetadata.Hash)); err != nil {
 			return fmt.Errorf("unstageFile: %w", err)
 		}
 		delete(index, file)
@@ -290,7 +291,7 @@ func unstageFile(file string) error {
 	// Stage for deletion if the file is tracked in the head commit.
 	if isTracked {
 		// remove file from WD if present, do nothing if file does not exist
-		if err := os.Remove(file); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		if err := restrictedDelete(file); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return fmt.Errorf("unstageFile: %w", err)
 		}
 		// stage for deletion (stage a deleted file)
@@ -303,11 +304,7 @@ func unstageFile(file string) error {
 
 // printBranchLog prints the commit log from head of current branch to initial commit.
 func printBranchLog() error {
-	headBranchFile, err := readContentsAsString(headFile)
-	if err != nil {
-		return fmt.Errorf("printBranchLog: %w", err)
-	}
-	headCommitHash, err := readContentsAsString(headBranchFile)
+	headCommitHash, err := getHeadCommitHash()
 	if err != nil {
 		return fmt.Errorf("printBranchLog: %w", err)
 	}
@@ -323,17 +320,16 @@ func printBranchLog() error {
 			break
 		}
 		currHash = curr.ParentUIDs[0] // traverse up first parent
-		curr, err = getCommit(currHash)
-		if err != nil {
+		if curr, err = getCommit(currHash); err != nil {
 			return fmt.Errorf("printBranchLog: %w", err)
 		}
 	}
 	return nil
 }
 
-// Print all commits in any order.
+// printAllCommits prints the log of all commits in any order.
 func printAllCommits() error {
-	return filepath.WalkDir(
+	if err := filepath.WalkDir(
 		objectsDir,
 		func(path string, d fs.DirEntry, err error) error {
 			if d.IsDir() {
@@ -346,13 +342,16 @@ func printAllCommits() error {
 			fmt.Printf("===\n%v\n", c.String(d.Name()))
 			return err
 		},
-	)
+	); err != nil {
+		return fmt.Errorf("printAllCommits: %w", err)
+	}
+	return nil
 }
 
-// Print all UIDs of commits with messages that contain a given substring query.
-func printAllCommitIDsByMessage(query string) error {
-	found := false
-	err := filepath.WalkDir(
+// printMatchingCommits prints all UIDs of commits with messages that contain a given substring query.
+func printMatchingCommits(query string) error {
+	hasMatch := false
+	if err := filepath.WalkDir(
 		objectsDir,
 		func(path string, d fs.DirEntry, err error) error {
 			if d.IsDir() {
@@ -363,17 +362,16 @@ func printAllCommitIDsByMessage(query string) error {
 				return c_err
 			}
 			if strings.Contains(c.Message, query) {
-				found = true
-				fmt.Printf("commit %v\n", d.Name())
+				hasMatch = true
+				log.Printf("commit %v\n", d.Name())
 			}
 			return err
 		},
-	)
-	if err != nil {
-		return err
+	); err != nil {
+		return fmt.Errorf("printMatchingCommits: %w", err)
 	}
-	if !found {
-		fmt.Println("Found no commit with that message.")
+	if !hasMatch {
+		log.Fatal("Found no commit with that message.")
 	}
 	return nil
 }
@@ -658,18 +656,18 @@ func addBranch(branchName string) error {
 	if _, err := os.Stat(branchFile); err == nil {
 		log.Fatal("A branch with that name already exists.")
 	} else if !errors.Is(err, fs.ErrNotExist) {
-		return err
+		return fmt.Errorf("addBranch: %w", err)
 	}
 	currentBranchFile, err := readContentsAsString(headFile)
 	if err != nil {
-		return err
+		return fmt.Errorf("addBranch: %w", err)
 	}
 	headCommitHash, err := readContents(currentBranchFile)
 	if err != nil {
-		return err
+		return fmt.Errorf("addBranch: %w", err)
 	}
 	if err := writeContents(branchFile, [][]byte{headCommitHash}); err != nil {
-		return err
+		return fmt.Errorf("addBranch: %w", err)
 	}
 	log.Printf("Branch '%v' was created on commit (%v).\n", branchName, string(headCommitHash[:6]))
 	return nil
@@ -679,19 +677,17 @@ func addBranch(branchName string) error {
 func removeBranch(branchName string) error {
 	headBranchFile, err := readContentsAsString(headFile)
 	if err != nil {
-		return err
+		return fmt.Errorf("removeBranch: %w", err)
 	}
 	if filepath.Base(headBranchFile) == branchName {
 		log.Fatal("Cannot remove the current branch.")
 	}
 
-	err = os.Remove(filepath.Join(branchHeadsDir, branchName))
-	if err != nil {
+	if err := restrictedDelete(filepath.Join(branchHeadsDir, branchName)); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			log.Fatal("A branch with that name does not exist.")
-		} else {
-			return err
 		}
+		return fmt.Errorf("removeBranch: %w", err)
 	}
 	log.Printf("Branch '%v' has been deleted.\n", branchName)
 	return nil

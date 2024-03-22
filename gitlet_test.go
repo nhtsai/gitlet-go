@@ -9,6 +9,8 @@ import (
 	"testing"
 )
 
+const initialCommitHash = "f14a7dfac63092f78fb5d209312a84315dd9ef73"
+
 func TestInit(t *testing.T) {
 	setupTempDir(t)
 	if err := newRepository(); err != nil {
@@ -21,7 +23,7 @@ func TestInit(t *testing.T) {
 		}
 	}
 	// check initial commit
-	expectedHash := "7914794a7f0269202a9611b759450eb00d5dba47"
+	expectedHash := initialCommitHash
 	if _, err := os.Stat(filepath.Join(objectsDir, expectedHash)); err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +109,7 @@ func TestAddFile(t *testing.T) {
 	}
 
 	// restaging a file after deletion
-	if err := os.Remove(testFile); err != nil {
+	if err := restrictedDelete(testFile); err != nil {
 		t.Fatal(err)
 	}
 	if err := stageFile(testFile); err != nil {

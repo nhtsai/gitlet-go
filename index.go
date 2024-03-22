@@ -6,9 +6,9 @@ import (
 
 // Metadata for staged files.
 type indexMetadata struct {
-	Hash     string
-	ModTime  int64
-	FileSize int64
+	Hash     string // Hash of the staged file blob.
+	ModTime  int64  // Timestamp of staging.
+	FileSize int64  // Size of file blob.
 }
 
 // Map between filename and staging metadata.
@@ -29,7 +29,7 @@ func readIndex() (indexMap, error) {
 
 // Write the index map object to the index file.
 func writeIndex(i indexMap) error {
-	indexData, err := serialize[indexMap](i)
+	indexData, err := serialize(i)
 	if err != nil {
 		return fmt.Errorf("writeIndex: %w", err)
 	}
