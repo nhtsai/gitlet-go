@@ -26,19 +26,29 @@ const stagedForRemovalMarker string = "DELETED"
 // newRepository creates a new Gitlet repository with an initial commit and a main branch.
 // The repository stored in .gitlet contains the necessary directories and files for Gitlet.
 func newRepository() error {
-	fi, err := os.Stat(gitletDir)
-	if (err == nil) && fi.IsDir() {
-		log.Fatal("A Gitlet version-control system already exists in the current directory.")
+	if dirInfo, err := os.Stat(gitletDir); err == nil {
+		if dirInfo.IsDir() {
+			log.Fatal("A Gitlet version-control system already exists in the current directory.")
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("newRepository: %w", err)
 	}
 
-	os.MkdirAll(objectsDir, 0755)
-	os.MkdirAll(branchHeadsDir, 0755)
-	os.MkdirAll(remotesDir, 0755)
+	if err := errors.Join(
+		os.Mkdir(gitletDir, 0755),
+		os.Mkdir(objectsDir, 0755),
+		os.MkdirAll(branchHeadsDir, 0755),
+		os.Mkdir(remotesDir, 0755),
+	); err != nil {
+		return fmt.Errorf("newRepository: %w", err)
+	}
 
-	// create initial commit
-	var initialCommit commit
-	initialCommit.Message = "initial commit"
-	initialCommit.Timestamp = time.Date(1970, time.January, 1, 0, 0, 0, 0, time.UTC).Unix()
+	initialCommit := commit{
+		Message:    "initial commit",
+		Timestamp:  time.Date(1970, time.January, 1, 0, 0, 0, 0, time.UTC).Unix(),
+		FileToBlob: make(map[string]string),
+		ParentUIDs: [2]string{"", ""},
+	}
 
 	contents, err := serialize(initialCommit)
 	if err != nil {
