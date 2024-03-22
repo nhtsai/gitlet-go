@@ -542,7 +542,7 @@ func checkoutCommit(file string, targetCommitUID string) error {
 	targetCommit, err := getCommit(targetCommitUID)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
-			log.Fatalf("No commit with that id exists.")
+			log.Fatal("No commit with that id exists.")
 		}
 		return fmt.Errorf("checkoutCommit: %w", err)
 	}
@@ -616,7 +616,7 @@ func checkoutBranch(targetBranch string) error {
 		}
 	}
 
-	// put all files from target branch head commit into the working directory,
+	// pull all files from target branch head commit into the working directory,
 	// creating or overwriting as needed
 	for file, targetBlobHash := range targetBranchHeadCommit.FileToBlob {
 		_, contents, err := readBlob(targetBlobHash)
@@ -694,8 +694,71 @@ func removeBranch(branchName string) error {
 	return nil
 }
 
-// reset
-func resetFile(file string) error {
+// resetFile checks out all files tracked by the given commit
+// and removes tracked files not present in that commit.
+func resetFile(targetCommitUID string) error {
+	targetCommit, err := getCommit(targetCommitUID)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			log.Fatal("No commit with that id exists.")
+		}
+		return fmt.Errorf("resetFile: %w", err)
+	}
+	headCommit, err := getHeadCommit()
+	if err != nil {
+		return fmt.Errorf("resetFile: %w", err)
+	}
+	// check working directory for untracked files that would be overwritten
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("resetFile: %w", err)
+	}
+	wdFiles, err := getFilenames(cwd)
+	if err != nil {
+		return fmt.Errorf("resetFile: %w", err)
+	}
+	for _, file := range wdFiles {
+		_, isTracked := headCommit.FileToBlob[file]
+		_, wouldBeOverwritten := targetCommit.FileToBlob[file]
+		if !isTracked && wouldBeOverwritten {
+			log.Fatal("There is an untracked file in the way; delete it, or add and commit it first.")
+		}
+	}
+
+	// checkout every file from the target commit
+	for file, targetBlobHash := range targetCommit.FileToBlob {
+		_, contents, err := readBlob(targetBlobHash)
+		if err != nil {
+			return fmt.Errorf("resetFile: %w", err)
+		}
+		if err := writeContents(file, contents); err != nil {
+			return fmt.Errorf("resetFile: %w", err)
+		}
+	}
+
+	// delete files in WD that are not target commit
+	for _, file := range wdFiles {
+		_, ok := targetCommit.FileToBlob[file]
+		if !ok {
+			if err := restrictedDelete(file); err != nil {
+				return fmt.Errorf("resetFile: %w", err)
+			}
+		}
+	}
+
+	// set current branch head commit to target commit
+	currentBranchFile, err := readContentsAsString(headFile)
+	if err != nil {
+		return fmt.Errorf("resetFile: %w", err)
+	}
+	if err = writeContents(currentBranchFile, []string{targetCommitUID}); err != nil {
+		return fmt.Errorf("resetFile: cannot set HEAD commit: %w", err)
+	}
+
+	// clear staging area
+	if err := newIndex(); err != nil {
+		return fmt.Errorf("resetFile: %w", err)
+	}
 	return nil
 }
 
