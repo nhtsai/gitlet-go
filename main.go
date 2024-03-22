@@ -5,14 +5,14 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 )
 
 func main() {
-	log.SetFlags(log.Lshortfile)
+	log.SetOutput(os.Stdout)
+	log.SetFlags(0)
 	if len(os.Args) == 1 {
 		log.Fatal("Please enter a command.")
 	}
@@ -28,11 +28,11 @@ func main() {
 		if err := newRepository(); err != nil {
 			log.Fatal(err)
 		}
-		cwd, err := os.Getwd()
-		if err != nil {
-			cwd = "."
+		if cwd, err := os.Getwd(); err != nil {
+			log.Println("Initialized new Gitlet repository.")
+		} else {
+			log.Printf("Initialized new Gitlet repository in %v\n", filepath.Join(cwd, gitletDir))
 		}
-		fmt.Printf("Initialized new Gitlet repository in %v\n", filepath.Join(cwd, gitletDir))
 	case "add":
 		validateArgs(os.Args, 2)
 		file := os.Args[2]
@@ -64,7 +64,7 @@ func main() {
 	case "find":
 		validateArgs(os.Args, 2)
 		query := os.Args[2]
-		if err := printAllCommitIDsByMessage(query); err != nil {
+		if err := printMatchingCommits(query); err != nil {
 			log.Fatal(err)
 		}
 	case "status":
@@ -73,39 +73,25 @@ func main() {
 			log.Fatal(err)
 		}
 	case "checkout":
-		// checkout -- filename
-		// filename := os.Args[3]
-		// commit_id, err := readContentsToString(".gitlet/HEAD")
-		// if err != nil {
-		// 	log.Fatal("No commit with that id exists.")
-		// }
-
-		// checkout commit_id -- filename
-		// commit := os.Args[2]
-
-		// checkout branch_name
-		// commit, err := readContentsToString(fmt.Sprintf(".gitlet/refs/heads/%s", os.Args[2]))
-
-		// targetBranchName := os.Args[2]
-		// targetBranchPath := filepath.Join(".gitlet", "refs", "heads", targetBranchName)
-		// currentBranch, err := readContentsToString(".gitlet/HEAD")
-		// if err != nil {
-		// 	log.Fatal(err)
-		// }
-		// if targetBranchName == currentBranch {
-		// 	log.Fatal("No need to checkout the current branch.")
-		// }
-		// _, err = os.Stat(targetBranchPath)
-		// if errors.Is(err, fs.ErrNotExist) {
-		// 	log.Fatal("No such branch exists.")
-		// }
-
-		// var targetCommit commit
-		// blob_id, missing := targetCommit.fileToBlob[filename]
-		// if missing {
-		// 	log.Fatal("File does nto exist in that commit.")
-		// }
-
+		if (len(os.Args) == 4) && os.Args[2] == "--" {
+			file := os.Args[3]
+			if err := checkoutHeadCommit(file); err != nil {
+				log.Fatal(err)
+			}
+		} else if (len(os.Args) == 5) && os.Args[3] == "--" {
+			commitUID := os.Args[2]
+			file := os.Args[4]
+			if err := checkoutCommit(file, commitUID); err != nil {
+				log.Fatal(err)
+			}
+		} else if len(os.Args) == 3 {
+			branchName := os.Args[2]
+			if err := checkoutBranch(branchName); err != nil {
+				log.Fatal(err)
+			}
+		} else {
+			log.Fatal("Incorrect operands.")
+		}
 	case "branch":
 		validateArgs(os.Args, 2)
 		branchName := os.Args[2]
@@ -120,12 +106,10 @@ func main() {
 		}
 	case "reset":
 		validateArgs(os.Args, 2)
-		// targetCommit := os.Args[2]
-
-		// look for commit blob
-		// readContentsAsString(filepath.Join(".gitlet", "objects", targetCommit))
-
-		// checkout
+		commitUID := os.Args[2]
+		if err := resetFile(commitUID); err != nil {
+			log.Fatal(err)
+		}
 	case "merge":
 		validateArgs(os.Args, 2)
 		branchName := os.Args[2]

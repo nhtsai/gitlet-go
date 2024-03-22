@@ -517,11 +517,139 @@ func printStatus() error {
 	slices.Sort(untracked)
 	for _, file := range untracked {
 		fmt.Println(file)
+
+/*
+checkoutHeadCommit pulls the file as it exists in the head commit into the working directory.
+This command will create the file if it does not exist and overwrites the existing file if it does exist.
+The new version of the file is not staged.
+*/
+func checkoutHeadCommit(file string) error {
+	headCommitHash, err := getHeadCommitHash()
+	if err != nil {
+		return fmt.Errorf("checkoutHeadCommit: %w", err)
+	}
+	if err := checkoutCommit(file, headCommitHash); err != nil {
+		return fmt.Errorf("checkoutHeadCommit: %w", err)
 	}
 	return nil
 }
 
-// TODO: checkout
+/*
+checkoutCommit pulls the file as it exists in the commit into the working directory.
+This command will create the file if it does not exist and overwrites the existing file if it does exist.
+The new version of the file is not staged.
+*/
+func checkoutCommit(file string, targetCommitUID string) error {
+	targetCommit, err := getCommit(targetCommitUID)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			log.Fatalf("No commit with that id exists.")
+		}
+		return fmt.Errorf("checkoutCommit: %w", err)
+	}
+	targetBlobHash, ok := targetCommit.FileToBlob[file]
+	if !ok {
+		log.Fatal("File does not exist in that commit.")
+	}
+	// read file contents from target commit
+	_, contents, err := readBlob(targetBlobHash)
+	if err != nil {
+		return fmt.Errorf("checkoutCommit: %w", err)
+	}
+	// write file contents into working directory
+	if err := writeContents(file, [][]byte{contents}); err != nil {
+		return fmt.Errorf("checkoutCommit: %w", err)
+	}
+	return nil
+}
+
+/*
+checkoutBranch switches the current branch to the target branch and pulls all files in
+the head commit of the target branch into the working directory.
+
+Files existing in the working directory are overwritten, and files that don't exist in
+the working directory are created. Tracked files in the current branch that are not
+present in the target branch are deleted, and the staging area is cleared.
+
+Returns an error if the current branch is the target branch, the target branch does not
+exist, or there is an untracked file that would be overwritten by the checkout.
+*/
+func checkoutBranch(targetBranch string) error {
+	currentBranchFile, err := readContentsAsString(headFile)
+	if err != nil {
+		return fmt.Errorf("checkoutBranch: %w", err)
+	}
+	currentBranch := filepath.Base(currentBranchFile)
+	if targetBranch == currentBranch {
+		log.Fatal("No need to checkout the current branch.")
+	}
+	targetBranchFile := filepath.Join(branchHeadsDir, targetBranch)
+	targetBranchHeadCommitHash, err := readContentsAsString(targetBranchFile)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			log.Fatal("No such branch exists.")
+		}
+		return fmt.Errorf("checkoutBranch: %w", err)
+	}
+	targetBranchHeadCommit, err := getCommit(targetBranchHeadCommitHash)
+	if err != nil {
+		return fmt.Errorf("checkoutBranch: %w", err)
+	}
+
+	// check working directory for untracked files
+	currentBranchHeadCommit, err := getHeadCommit()
+	if err != nil {
+		return fmt.Errorf("checkoutBranch: %w", err)
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("checkoutBranch: %w", err)
+	}
+	wdFiles, err := getFilenames(cwd)
+	if err != nil {
+		return fmt.Errorf("checkoutBranch: %w", err)
+	}
+	for _, file := range wdFiles {
+		_, isTracked := currentBranchHeadCommit.FileToBlob[file]
+		_, wouldBeOverwritten := targetBranchHeadCommit.FileToBlob[file]
+		if !isTracked && wouldBeOverwritten {
+			log.Fatal("There is an untracked file in the way; delete it, or add and commit it first.")
+		}
+	}
+
+	// put all files from target branch head commit into the working directory,
+	// creating or overwriting as needed
+	for file, targetBlobHash := range targetBranchHeadCommit.FileToBlob {
+		_, contents, err := readBlob(targetBlobHash)
+		if err != nil {
+			return fmt.Errorf("checkoutBranch: %w", err)
+		}
+		if err := writeContents(file, contents); err != nil {
+			return fmt.Errorf("checkoutBranch: %w", err)
+		}
+	}
+
+	// delete files in WD that are not target branch head commit
+	for _, file := range wdFiles {
+		_, ok := targetBranchHeadCommit.FileToBlob[file]
+		if !ok {
+			if err := restrictedDelete(file); err != nil {
+				return fmt.Errorf("checkoutBranch: %w", err)
+			}
+		}
+	}
+
+	// set current branch to target branch
+	if err = writeContents(headFile, []string{targetBranchFile}); err != nil {
+		return fmt.Errorf("checkoutBranch: cannot set HEAD file: %w", err)
+	}
+
+	// clear staging area
+	if err := newIndex(); err != nil {
+		return fmt.Errorf("checkoutBranch: %w", err)
+	}
+	return nil
+}
 
 // Add a new branch pointing to the head commit of the current branch.
 // Does not automatically switch to the new branch.

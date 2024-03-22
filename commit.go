@@ -3,9 +3,11 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -113,7 +115,6 @@ func parseBlobHeader(hash string) (string, error) {
 func readBlob(hash string) (string, []byte, error) {
 	var header string
 	var contents []byte
-	var err error
 	f, err := os.Open(filepath.Join(objectsDir, hash))
 	if err != nil {
 		return header, contents, fmt.Errorf("readBlob: %w", err)
@@ -139,16 +140,24 @@ func readBlob(hash string) (string, []byte, error) {
 // Returns an error if the blob is not a commit blob.
 func getCommit(hash string) (commit, error) {
 	var c commit
+	var err error
+	if len(hash) < 40 {
+		hash, err = resolveHash(hash)
+		if err != nil {
+			return c, fmt.Errorf("getCommit: could not resolve hash %v: %w", hash, err)
+		}
+	}
+
 	header, contents, err := readBlob(hash)
 	if err != nil {
-		return c, fmt.Errorf("getCommitFromBlob: %w", err)
+		return c, fmt.Errorf("getCommit: %w", err)
 	}
 	if header != "commit" {
-		return c, fmt.Errorf("getCommitFromBlob: incorrect blob header, want 'commit', got '%v'", header)
+		return c, fmt.Errorf("getCommit: incorrect blob header, want 'commit', got '%v'", header)
 	}
 	c, err = deserialize[commit](contents)
 	if err != nil {
-		return c, fmt.Errorf("getCommitFromBlob: %w", err)
+		return c, fmt.Errorf("getCommit: %w", err)
 	}
 	return c, nil
 }
@@ -161,4 +170,26 @@ func writeBlob(header string, b []byte) error {
 	}
 	blobFile := filepath.Join(objectsDir, hash)
 	return writeContents(blobFile, payload)
+}
+
+// resolveHash matches the given hash abbreviation and returns the corresponding a full
+// hash in the objects directory.
+func resolveHash(hash string) (string, error) {
+	blobFiles, err := getFilenames(objectsDir)
+	if err != nil {
+		return "", fmt.Errorf("resolveHash: %w", err)
+	}
+	var matched []string
+	for _, file := range blobFiles {
+		if strings.HasPrefix(file, hash) {
+			matched = append(matched, file)
+		}
+	}
+	if len(matched) < 1 {
+		return "", errors.New("resolveHash: no matching blobs found")
+	} else if len(matched) > 1 {
+		return "", errors.New("resolveHash: ambiguous hash prefix")
+	} else {
+		return matched[0], nil
+	}
 }
