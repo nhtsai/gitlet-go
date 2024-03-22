@@ -325,7 +325,7 @@ func printBranchLog() error {
 	var curr = headCommit
 	var currHash = headCommitHash
 	for {
-		fmt.Printf("===\n%v\n", curr.String(currHash))
+		log.Printf("===\n%v\n", curr.String(currHash))
 		if curr.ParentUIDs[0] == "" {
 			break
 		}
@@ -349,7 +349,7 @@ func printAllCommits() error {
 			if c_err != nil {
 				return c_err
 			}
-			fmt.Printf("===\n%v\n", c.String(d.Name()))
+			log.Printf("===\n%v\n", c.String(d.Name()))
 			return err
 		},
 	); err != nil {
@@ -386,8 +386,9 @@ func printMatchingCommits(query string) error {
 	return nil
 }
 
+// printStatus prints the current state of the repository.
 func printStatus() error {
-	fmt.Println("=== Branches ===")
+	log.Println("=== Branches ===")
 	currentBranchFile, err := readContentsAsString(headFile)
 	if err != nil {
 		return fmt.Errorf("printStatus: %w", err)
@@ -400,9 +401,10 @@ func printStatus() error {
 	slices.Sort(branches)
 	for _, branch := range branches {
 		if branch == currentBranch {
-			fmt.Print("*")
+			log.Printf("*%v\n", branch)
+		} else {
+			log.Println(branch)
 		}
-		fmt.Println(branch)
 	}
 
 	index, err := readIndex()
@@ -410,7 +412,6 @@ func printStatus() error {
 		return fmt.Errorf("printStatus: %w", err)
 	}
 	var staged, removed []string
-
 	for k, v := range index {
 		if v.Hash == stagedForRemovalMarker {
 			removed = append(removed, k)
@@ -419,31 +420,19 @@ func printStatus() error {
 		}
 	}
 
-	fmt.Println("\n=== Staged Files ===")
+	log.Println("\n=== Staged Files ===")
 	slices.Sort(staged)
 	for _, file := range staged {
-		fmt.Println(file)
+		log.Println(file)
 	}
 
-	fmt.Println("\n=== Removed Files ===")
+	log.Println("\n=== Removed Files ===")
 	slices.Sort(removed)
 	for _, file := range removed {
-		fmt.Println(file)
+		log.Println(file)
 	}
 
-	fmt.Println("\n=== Modifications Not Staged For Commit ===")
-	/*
-		- tracked in current commit, changed in WD, but not staged
-			- iterate through tracked, check index if not staged, check WD if modified
-		- not staged for removal, but tracked in the current commit and deleted from the working directory.
-			- iterate through tracked, check index if not staged, check WD if deleted
-		- staged for addition, different contents (hash) than WD
-			- iterate through index (non deletion), check WD if modified
-		- staged for addition, deleted in WD
-			- iterate through index (non deletion), check WD if deleted
-
-	*/
-
+	log.Println("\n=== Modifications Not Staged For Commit ===")
 	// files in head commit that are not in wd and not staged
 	headCommit, err := getHeadCommit()
 	if err != nil {
@@ -497,14 +486,13 @@ func printStatus() error {
 				unstagedChanges = append(unstagedChanges, fmt.Sprintf("%v (modified)", stagedFile))
 			}
 		}
-
 	}
 	slices.Sort(unstagedChanges)
 	for _, file := range unstagedChanges {
-		fmt.Println(file)
+		log.Println(file)
 	}
 
-	fmt.Println("\n=== Untracked Files ===")
+	log.Println("\n=== Untracked Files ===")
 	var untracked []string
 	// files in wd that are not tracked or staged
 	cwd, err := os.Getwd()
@@ -524,7 +512,10 @@ func printStatus() error {
 	}
 	slices.Sort(untracked)
 	for _, file := range untracked {
-		fmt.Println(file)
+		log.Println(file)
+	}
+	return nil
+}
 
 /*
 checkoutHeadCommit pulls the file as it exists in the head commit into the working directory.
