@@ -18,36 +18,30 @@ type commit struct {
 	Message    string            // User supplied commit message.
 	Timestamp  int64             // When the commit was created in UNIX time in UTC.
 	FileToBlob map[string]string // Map of file names to file blob UIDs tracked in the commit.
-
-	// SHA1 hash of the parent commit. Merge commits should have two parents.
-	// Merge: current branch + target branch -> HEAD + arg
-	ParentUIDs [2]string
+	ParentUIDs [2]string         // SHA1 hash of the parent commit. Merge commits have two parents.
 }
 
 func (c *commit) String(hash string) string {
-	if c.ParentUIDs[1] != "" {
+	if isMergeCommit := c.ParentUIDs[1] != ""; isMergeCommit {
 		return fmt.Sprintf(
 			"commit %v\n"+
 				"Merge: %v %v\n"+
 				"Date: %v\n"+
-				"%v\n"+
-				"Merged %v into %v.\n",
+				"%v\n",
 			hash,
 			c.ParentUIDs[0][:6], c.ParentUIDs[1][:6],
 			time.Unix(c.Timestamp, 0).Local().Format("Mon Jan 02 15:04:05 2006 -0700"),
 			c.Message,
-			c.ParentUIDs[0], c.ParentUIDs[1],
-		)
-	} else {
-		return fmt.Sprintf(
-			"commit %v\n"+
-				"Date: %v\n"+
-				"%v\n",
-			hash,
-			time.Unix(c.Timestamp, 0).Local().Format("Mon Jan 02 15:04:05 2006 -0700"),
-			c.Message,
 		)
 	}
+	return fmt.Sprintf(
+		"commit %v\n"+
+			"Date: %v\n"+
+			"%v\n",
+		hash,
+		time.Unix(c.Timestamp, 0).Local().Format("Mon Jan 02 15:04:05 2006 -0700"),
+		c.Message,
+	)
 }
 
 func getHeadCommitHash() (string, error) {
