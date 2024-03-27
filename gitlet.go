@@ -191,6 +191,44 @@ func stageFile(file string) error {
 	return nil
 }
 
+func writeCommit(c commit) (string, error) {
+	index, err := readIndex()
+	if err != nil {
+		return "", fmt.Errorf("writeCommit: %w", err)
+	}
+	if len(index) == 0 {
+		log.Fatal("No changes added to commit.")
+	}
+
+	contents, err := serialize(c)
+	if err != nil {
+		return "", fmt.Errorf("writeCommit: could not serialize commit: %w", err)
+	}
+	payload := []any{"commit", []byte{blobHeaderDelim}, contents}
+	commitHash, err := getHash(payload)
+	if err != nil {
+		return "", fmt.Errorf("writeCommit: could not create commit hash: %w", err)
+	}
+	if err := writeContents(filepath.Join(objectsDir, commitHash), payload); err != nil {
+		return "", fmt.Errorf("writeCommit: cannot write commit blob: %w", err)
+	}
+
+	// set current branch head commit to new commit
+	currentBranchFile, err := readContentsAsString(headFile)
+	if err != nil {
+		return "", fmt.Errorf("writeCommit: %w", err)
+	}
+	if err := writeContents(currentBranchFile, []string{commitHash}); err != nil {
+		return "", fmt.Errorf("writeCommit: cannot update current branch file: %w", err)
+	}
+
+	// clear index
+	if err := newIndex(); err != nil {
+		return "", fmt.Errorf("newCommit: cannot clear index: %w", err)
+	}
+	return commitHash, nil
+}
+
 // newCommit creates a new commit.
 // Returns an error if commit message is empty or if no files are staged.
 func newCommit(message string) error {
@@ -241,28 +279,8 @@ func newCommit(message string) error {
 		}
 	}
 
-	// write commit blob
-	contents, err := serialize(c)
-	if err != nil {
-		return fmt.Errorf("newCommit: could not serialize commit: %w", err)
-	}
-	payload := []any{"commit", []byte{blobHeaderDelim}, contents}
-	commitHash, err := getHash(payload)
-	if err != nil {
-		return fmt.Errorf("newCommit: could not create commit hash: %w", err)
-	}
-	if err := writeContents(filepath.Join(objectsDir, commitHash), payload); err != nil {
-		return fmt.Errorf("newCommit: cannot write commit blob: %w", err)
-	}
-
-	// update branch to new commit
-	if err := writeContents(currentBranchFile, []string{commitHash}); err != nil {
-		return fmt.Errorf("newCommit: cannot update current branch file: %w", err)
-	}
-
-	// clear index
-	if err := newIndex(); err != nil {
-		return fmt.Errorf("newCommit: cannot clear index: %w", err)
+	if _, err := writeCommit(c); err != nil {
+		return fmt.Errorf("newCommit: %w", err)
 	}
 	return nil
 }
