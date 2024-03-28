@@ -257,4 +257,121 @@ func TestRemoveBranch(t *testing.T) {
 
 func TestReset(t *testing.T) {}
 
-func TestMerge(t *testing.T) {}
+func TestMerge(t *testing.T) {
+	setupTestRepo(t)
+	wd, err := os.Getwd()
+	if err != nil {
+		t.Error(err)
+	}
+
+	// split point
+	if err := writeContents("a.txt", []string{"A"}); err != nil {
+		t.Error(err)
+	}
+	if err := writeContents("b.txt", []string{"B"}); err != nil {
+		t.Error(err)
+	}
+	if err := stageFile("a.txt"); err != nil {
+		t.Error(err)
+	}
+	if err := stageFile("b.txt"); err != nil {
+		t.Error(err)
+	}
+	if err := newCommit("commit split point"); err != nil {
+		t.Error(err)
+	}
+	files, err := getFilenames(wd)
+	if err != nil {
+		t.Error(err)
+	}
+	for _, f := range files {
+		t.Log(f)
+	}
+
+	// target branch
+	if err := addBranch("target"); err != nil {
+		t.Error(err)
+	}
+	if err := checkoutBranch("target"); err != nil {
+		t.Error(err)
+	}
+	if err := restrictedDelete("a.txt"); err != nil {
+		t.Error(err)
+	}
+	if err := writeContents("b.txt", []string{"!B"}); err != nil {
+		t.Error(err)
+	}
+	if err := stageFile("a.txt"); err != nil {
+		t.Error(err)
+	}
+	if err := stageFile("b.txt"); err != nil {
+		t.Error(err)
+	}
+	if err := newCommit("commit target branch"); err != nil {
+		t.Error(err)
+	}
+	files, err = getFilenames(wd)
+	if err != nil {
+		t.Error(err)
+	}
+	for _, f := range files {
+		t.Log(f)
+	}
+
+	// current branch
+	if err := checkoutBranch("main"); err != nil {
+		t.Error(err)
+	}
+	if err := writeContents("a.txt", []string{"!A"}); err != nil {
+		t.Error(err)
+	}
+	if err := writeContents("c.txt", []string{"C"}); err != nil {
+		t.Error(err)
+	}
+	if err := stageFile("a.txt"); err != nil {
+		t.Error(err)
+	}
+	if err := stageFile("c.txt"); err != nil {
+		t.Error(err)
+	}
+	if err := newCommit("commit current branch"); err != nil {
+		t.Error(err)
+	}
+	files, err = getFilenames(wd)
+	if err != nil {
+		t.Error(err)
+	}
+	for _, f := range files {
+		t.Log(f)
+	}
+
+	if err := mergeBranch("target"); err != nil {
+		t.Error(err)
+	}
+
+	aString, err := readContentsAsString("a.txt")
+	if err != nil {
+		t.Error(err)
+	}
+
+	if expectedAString := "<<<<<<< HEAD" + "!A" + "=======" + "" + ">>>>>>>"; aString != (expectedAString) {
+		t.Errorf("Incorrect a.txt conflict file: want '%v', got '%v'.", expectedAString, aString)
+	}
+
+	bString, err := readContentsAsString("b.txt")
+	if err != nil {
+		t.Error(err)
+	}
+	if bString != "!B" {
+		t.Errorf("Incorrect b.txt file: want '!B', got %v.", bString)
+	}
+
+	cString, err := readContentsAsString("c.txt")
+	if err != nil {
+		t.Error(err)
+	}
+	if cString != "C" {
+		t.Errorf("Incorrect c.txt file: want 'C', got %v.", cString)
+	}
+
+}

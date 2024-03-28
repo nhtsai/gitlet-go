@@ -780,7 +780,327 @@ func resetFile(targetCommitUID string) error {
 	return nil
 }
 
-// merge
+// mergeBranch merges files from the given branch into the current branch.
 func mergeBranch(branchName string) error {
+	// check for uncommitted changes in staging area
+	idx, err := readIndex()
+	if err != nil {
+		return fmt.Errorf("mergeBranch: %w", err)
+	}
+	if len(idx) != 0 {
+		log.Fatal("You have uncommitted changes.")
+	}
+
+	// check target branch exists
+	targetBranchFile := filepath.Join(branchHeadsDir, branchName)
+	targetBranchHeadCommitHash, err := readContentsAsString(targetBranchFile)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			log.Fatal("A branch with that name does not exist.")
+		}
+		return fmt.Errorf("mergeBranch: %w", err)
+	}
+
+	// check current branch is not target branch
+	currentBranchFile, err := readContentsAsString(headFile)
+	if err != nil {
+		return fmt.Errorf("mergeBranch: %w", err)
+	}
+	currentBranch := filepath.Base(currentBranchFile)
+	if branchName == currentBranch {
+		log.Fatal("Cannot merge a branch with itself.")
+	}
+
+	targetBranchHeadCommit, err := getCommit(targetBranchHeadCommitHash)
+	if err != nil {
+		return fmt.Errorf("mergeBranch: %w", err)
+	}
+	currentBranchHeadCommit, err := getHeadCommit()
+	if err != nil {
+		return fmt.Errorf("mergeBranch: %w", err)
+	}
+
+	// check working directory for untracked files
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("mergeBranch: %w", err)
+	}
+	wdFiles, err := getFilenames(cwd)
+	if err != nil {
+		return fmt.Errorf("mergeBranch: %w", err)
+	}
+	// TODO: check tracked but modified WD files with not yet staged changes
+	for _, file := range wdFiles {
+		_, isTracked := currentBranchHeadCommit.FileToBlob[file]
+		_, wouldBeOverwritten := targetBranchHeadCommit.FileToBlob[file]
+		if !isTracked && wouldBeOverwritten {
+			log.Fatal("There is an untracked file in the way; delete it, or add and commit it first.")
+		}
+	}
+	currentBranchHeadCommitHash, err := getHeadCommitHash()
+	if err != nil {
+		return fmt.Errorf("mergeBranch: %w", err)
+	}
+
+	// find split point (latest common ancestor)
+	splitPointCommitHash, err := findSplitPoint(currentBranchHeadCommitHash, targetBranchHeadCommitHash)
+	if err != nil {
+		return fmt.Errorf("mergeBranch: %w", err)
+	}
+
+	// check if split point same commit as given branch
+	// merge is complete; do nothing
+	if splitPointCommitHash == targetBranchHeadCommitHash {
+		log.Println("Given branch is an ancestor of the current branch.")
+		return nil
+	}
+	// check if split point is the current branch
+	// checkout the target branch
+	if splitPointCommitHash == currentBranchHeadCommitHash {
+		if err := checkoutBranch(branchName); err != nil {
+			return fmt.Errorf("mergeBranch: %w", err)
+		}
+		log.Println("Current branch fast-forwarded.")
+		return nil
+	}
+
+	splitPointCommit, err := getCommit(splitPointCommitHash)
+	if err != nil {
+		return fmt.Errorf("mergeBranch: %w", err)
+	}
+
+	// all files: splitPoint, current, target, WD??
+	allFiles := make(map[string]bool)
+	for file := range splitPointCommit.FileToBlob {
+		allFiles[file] = true
+	}
+	for file := range currentBranchHeadCommit.FileToBlob {
+		allFiles[file] = true
+	}
+	for file := range targetBranchHeadCommit.FileToBlob {
+		allFiles[file] = true
+	}
+	for file := range allFiles {
+		targetHeadFileBlob, inTargetBranchHeadCommit := targetBranchHeadCommit.FileToBlob[file]
+		currentHeadFileBlob, inCurrentBranchHeadCommit := currentBranchHeadCommit.FileToBlob[file]
+		splitPointFileBlob, inSplitPointCommit := splitPointCommit.FileToBlob[file]
+
+		// modified: file has been removed, changed, added since split point
+		removedInCurrentBranch := (inSplitPointCommit && !inCurrentBranchHeadCommit)
+		changedInCurrentBranch := (inSplitPointCommit && inCurrentBranchHeadCommit && (splitPointFileBlob != currentHeadFileBlob))
+		addedInCurrentBranch := (!inSplitPointCommit && inCurrentBranchHeadCommit)
+		modifiedInCurrentBranch := removedInCurrentBranch || changedInCurrentBranch || addedInCurrentBranch
+
+		removedInTargetBranch := (inSplitPointCommit && !inTargetBranchHeadCommit)
+		changedInTargetBranch := (inSplitPointCommit && inTargetBranchHeadCommit && (splitPointFileBlob != targetHeadFileBlob))
+		addedInTargetBranch := (!inSplitPointCommit && inTargetBranchHeadCommit)
+		modifiedInTargetBranch := removedInTargetBranch || changedInTargetBranch || addedInTargetBranch
+
+		// 1) modified in target branch, unmodified in current branch
+		if modifiedInTargetBranch && !modifiedInCurrentBranch {
+			// checkout target branch version and stage
+			if err := checkoutCommit(file, targetBranchHeadCommitHash); err != nil {
+				return err
+			}
+			if err := stageFile(file); err != nil {
+				return err
+			}
+			continue
+
+			// 2) modified in current branch, unmodified in target branch
+		} else if modifiedInCurrentBranch && !modifiedInTargetBranch {
+			// keep current branch version and stage
+			if err := stageFile(file); err != nil {
+				return err
+			}
+			continue
+			// 3) modified in both current and target
+		} else if modifiedInCurrentBranch && modifiedInTargetBranch {
+			// both removed
+			if removedInCurrentBranch && removedInTargetBranch {
+				// the removed file can exist in WD, untracked and unstaged
+				continue
+			}
+			if !removedInCurrentBranch && !removedInTargetBranch {
+				// same hash
+				if currentHeadFileBlob == targetHeadFileBlob {
+					continue
+				}
+				// same contents
+				_, currentBranchFileContents, err := readBlob(currentHeadFileBlob)
+				if err != nil {
+					return fmt.Errorf("mergeBranch: cannot read current file blob: %w", err)
+				}
+				_, targetBranchFileContents, err := readBlob(targetHeadFileBlob)
+				if err != nil {
+					return fmt.Errorf("mergeBranch: cannot read target file blob: %w", err)
+				}
+				if slices.Compare(currentBranchFileContents, targetBranchFileContents) == 0 {
+					continue
+				}
+			}
+		}
+
+		// 4) not in split point, not in target branch, in current branch
+		if !inSplitPointCommit && !inTargetBranchHeadCommit && inCurrentBranchHeadCommit {
+			if err := stageFile(file); err != nil {
+				return err
+			}
+			continue
+		}
+
+		// 5) not in split point, in target branch, not in current branch
+		if !inSplitPointCommit && inTargetBranchHeadCommit && !inCurrentBranchHeadCommit {
+			// checkout from target branch and stage
+			if err := checkoutCommit(file, targetBranchHeadCommitHash); err != nil {
+				return err
+			}
+			if err := stageFile(file); err != nil {
+				return err
+			}
+			continue
+		}
+
+		// 6) in split point, unmodified in current branch, not in target branch
+		if inSplitPointCommit && !modifiedInCurrentBranch && !inTargetBranchHeadCommit {
+			// remove and untrack
+			if err := unstageFile(file); err != nil {
+				return fmt.Errorf("mergeBranch: %w", err)
+			}
+			continue
+		}
+
+		// 7) in split point, unmodified in target branch, not in current branch
+		if inSplitPointCommit && !modifiedInTargetBranch && !inCurrentBranchHeadCommit {
+			continue
+		}
+
+		// 8) files are in conflict, both modified
+		if modifiedInCurrentBranch && modifiedInTargetBranch {
+			var currentBranchFileContents, targetBranchFileContents []byte
+			// contents are changed and different
+			// contents of one are changed and other is deleted
+			// file absent at split point and has different contents in target and current branches
+			if !removedInCurrentBranch {
+				_, currentBranchFileContents, err = readBlob(currentHeadFileBlob)
+				if err != nil {
+					return err
+				}
+			}
+			if !removedInTargetBranch {
+				_, targetBranchFileContents, err = readBlob(targetHeadFileBlob)
+				if err != nil {
+					return err
+				}
+			}
+			if err := writeContents(file,
+				[]any{
+					"<<<<<<< HEAD",
+					currentBranchFileContents,
+					"=======",
+					targetBranchFileContents,
+					">>>>>>>",
+				},
+			); err != nil {
+				return err
+			}
+			if err := stageFile(file); err != nil {
+				return err
+			}
+			continue
+		}
+	}
+
+	if err := newMergeCommit(branchName, targetBranchHeadCommitHash, currentBranch, currentBranchHeadCommitHash); err != nil {
+		return fmt.Errorf("mergeBranch: %w", err)
+	}
+	log.Print("Encountered a merge conflict.")
+	return nil
+}
+
+// findSplitPoint finds the latest common ancestor given two commit UIDs.
+//
+// Uses BFS with map to record visited ancestors, breaking upon finding the earliest common one.
+// Time: O(H), where H is the height of the DAG
+// Space: O(H), recording every parent node upon visiting
+func findSplitPoint(commitUID1 string, commitUID2 string) (string, error) {
+	visited := make(map[string]bool)
+	queue := []string{commitUID1, commitUID2}
+	for len(queue) > 0 {
+		commitUID := queue[0]
+		if visited[commitUID] {
+			return commitUID, nil
+		}
+		visited[commitUID] = true
+		queue = queue[1:]
+		c, err := getCommit(commitUID)
+		if err != nil {
+			return "", fmt.Errorf("findSplitPoint: %w", err)
+		}
+		for _, parentUID := range c.ParentUIDs {
+			if parentUID != "" {
+				queue = append(queue, parentUID)
+			}
+		}
+	}
+	return "", errors.New("findSplitPoint: no valid commit")
+}
+
+func newMergeCommit(
+	targetBranch string,
+	targetBranchHeadCommitHash string,
+	currentBranch string,
+	currentBranchHeadCommitHash string,
+) error {
+	c := commit{
+		Message:    fmt.Sprintf("Merged %v into %v.", targetBranch, currentBranch),
+		Timestamp:  time.Now().Unix(),
+		FileToBlob: make(map[string]string),
+		ParentUIDs: [2]string{currentBranchHeadCommitHash, targetBranchHeadCommitHash},
+	}
+
+	headCommit, err := getHeadCommit()
+	if err != nil {
+		return fmt.Errorf("newCommit: %w", err)
+	}
+	// create file to blob mapping from the previous commit
+	for file, blobUID := range headCommit.FileToBlob {
+		c.FileToBlob[file] = blobUID
+	}
+	// overwrite mapping with staged files
+	index, err := readIndex()
+	if err != nil {
+		return err
+	}
+	for file, metadata := range index {
+		if metadata.Hash == stagedForRemovalMarker {
+			// remove file from commit if it is staged for deletion
+			delete(c.FileToBlob, file)
+		} else {
+			c.FileToBlob[file] = metadata.Hash
+		}
+	}
+
+	// write commit blob
+	commitHash, err := writeCommit(c)
+	if err != nil {
+		return err
+	}
+
+	// set current branch head commit to new commit
+	currentBranchFile, err := readContentsAsString(headFile)
+	if err != nil {
+		return err
+	}
+	if err := writeContents(currentBranchFile, []string{commitHash}); err != nil {
+		return fmt.Errorf("newCommit: cannot update current branch file: %w", err)
+	}
+
+	// clear index
+	if err := newIndex(); err != nil {
+		return fmt.Errorf("newCommit: cannot clear index: %w", err)
+	}
+	return nil
+}
 	return nil
 }
