@@ -111,21 +111,21 @@ func stageFile(file string) error {
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			if isTracked {
-				if isStaged {
-					// path: not in WD (modified), is staged, is tracked
-					// skip, file is already staged for deletion
-					return nil
-				} else {
-					// path: not in WD (modified), not staged, is tracked
-					// stage file for deletion
-					index[file] = indexMetadata{stagedForRemovalMarker, time.Now().Unix(), 0}
-					if err := writeIndex(index); err != nil {
-						return fmt.Errorf("stageFile: could not stage file for deletion: %w", err)
-					}
+				// path: not in WD (modified), is staged (for deletion), is tracked
+				if isStaged && stagedMetadata.Hash == stagedForRemovalMarker {
+					log.Printf("File '%v' is already staged.\n", file)
 					return nil
 				}
+				// path: not in WD (modified), not staged (for deletion), is tracked
+				// stage file for deletion
+				index[file] = indexMetadata{stagedForRemovalMarker, time.Now().Unix(), 0}
+				if err := writeIndex(index); err != nil {
+					return fmt.Errorf("stageFile: could not stage file for deletion: %w", err)
+				}
+				return nil
 			} else {
 				if isStaged {
+					// path: not in WD
 					// remove staged blob
 					if err := restrictedDelete(filepath.Join(objectsDir, stagedMetadata.Hash)); err != nil {
 						return fmt.Errorf("stageFile: cannot delete old file blob: %w", err)
@@ -435,11 +435,11 @@ func printStatus() error {
 		return fmt.Errorf("printStatus: %w", err)
 	}
 	var staged, removed []string
-	for k, v := range index {
-		if v.Hash == stagedForRemovalMarker {
-			removed = append(removed, k)
+	for file, stagedMetadata := range index {
+		if stagedMetadata.Hash == stagedForRemovalMarker {
+			removed = append(removed, file)
 		} else {
-			staged = append(staged, k)
+			staged = append(staged, file)
 		}
 	}
 
@@ -456,42 +456,45 @@ func printStatus() error {
 	}
 
 	log.Println("\n=== Modifications Not Staged For Commit ===")
-	// files in head commit that are not in wd and not staged
 	headCommit, err := getHeadCommit()
 	if err != nil {
 		return fmt.Errorf("printStatus: %w", err)
 	}
 	var unstagedChanges []string
-	// check tracked but unstaged files
+	// check tracked files (deleted in WD, modified and unstaged in WD)
 	for trackedFile, trackedHash := range headCommit.FileToBlob {
 		_, isStaged := index[trackedFile]
 		if isStaged {
 			continue
 		}
 		contents, err := readContents(trackedFile)
+
 		// check if deleted
 		if errors.Is(err, fs.ErrNotExist) {
 			unstagedChanges = append(unstagedChanges, fmt.Sprintf("%v (deleted)", trackedFile))
 		} else if err != nil {
 			return fmt.Errorf("printStatus: %w", err)
-		} else {
-			// check if modified
-			payload := []any{"file", []byte{blobHeaderDelim}, contents}
-			wdHash, err := getHash(payload)
-			if err != nil {
-				return fmt.Errorf("printStatus: %w", err)
-			}
-			if wdHash != trackedHash {
-				unstagedChanges = append(unstagedChanges, fmt.Sprintf("%v (modified)", trackedFile))
-			}
+		}
+
+		// check if modified
+		payload := []any{"file", []byte{blobHeaderDelim}, contents}
+		wdHash, err := getHash(payload)
+		if err != nil {
+			return fmt.Errorf("printStatus: %w", err)
+		}
+		if wdHash != trackedHash {
+			unstagedChanges = append(unstagedChanges, fmt.Sprintf("%v (modified)", trackedFile))
 		}
 	}
 
-	// check staged files
+	// check staged files (deleted in WD, modified in WD)
+	// TODO: combine iteration with Staged and Removed sections
 	for stagedFile, stagedMetadata := range index {
+		// skip files staged for removal
 		if stagedMetadata.Hash == stagedForRemovalMarker {
 			continue
 		}
+
 		contents, err := readContents(stagedFile)
 		// check if deleted
 		if errors.Is(err, fs.ErrNotExist) {
