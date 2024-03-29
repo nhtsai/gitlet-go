@@ -116,6 +116,13 @@ func main() {
 		if err := mergeBranch(branchName); err != nil {
 			log.Fatal(err)
 		}
+	case "add-remote":
+		validateArgs(os.Args, 3)
+		remoteName := os.Args[2]
+		remoteURL := os.Args[3]
+		if err := addRemote(remoteName, remoteURL); err != nil {
+			log.Fatal(err)
+		}
 	default:
 		log.Fatal("No command with that name exists.")
 	}

@@ -17,7 +17,7 @@ func TestInit(t *testing.T) {
 		t.Fatal(err)
 	}
 	// check dirs and files
-	for _, d := range []string{gitletDir, objectsDir, branchHeadsDir, remotesDir, headFile, indexFile} {
+	for _, d := range []string{gitletDir, objectsDir, branchesDir, remotesDir, headFile, indexFile} {
 		if _, err := os.Stat(d); err != nil {
 			t.Fatal(err)
 		}
@@ -28,7 +28,7 @@ func TestInit(t *testing.T) {
 		t.Fatal(err)
 	}
 	// check HEAD file
-	expectedHeadFile := filepath.Join(branchHeadsDir, "main")
+	expectedHeadFile := filepath.Join(branchesDir, "main")
 	headBytes, err := os.ReadFile(headFile)
 	if err != nil {
 		t.Fatal(err)
@@ -198,9 +198,7 @@ func TestRemoveStaged(t *testing.T) {
 	}
 }
 
-func TestRemoveTracked(t *testing.T) {
-
-}
+func TestRemoveTracked(t *testing.T) {}
 
 func TestLog(t *testing.T) {}
 
@@ -218,7 +216,7 @@ func TestBranch(t *testing.T) {
 	if err := addBranch(testBranch); err != nil {
 		t.Fatal(err)
 	}
-	testBranchHeadCommitHash, err := readContentsAsString(filepath.Join(branchHeadsDir, testBranch))
+	testBranchHeadCommitHash, err := readContentsAsString(filepath.Join(branchesDir, testBranch))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +248,7 @@ func TestRemoveBranch(t *testing.T) {
 		t.Fatal(err)
 	}
 	// check if branch was deleted
-	if _, err := os.Stat(filepath.Join(branchHeadsDir, testBranch)); err == nil {
+	if _, err := os.Stat(filepath.Join(branchesDir, testBranch)); err == nil {
 		t.Fatalf("Branch '%v' was not removed: %v", testBranch, err)
 	}
 }
@@ -259,10 +257,6 @@ func TestReset(t *testing.T) {}
 
 func TestMerge(t *testing.T) {
 	setupTestRepo(t)
-	wd, err := os.Getwd()
-	if err != nil {
-		t.Error(err)
-	}
 
 	// split point
 	if err := writeContents("a.txt", []string{"A"}); err != nil {
@@ -279,13 +273,6 @@ func TestMerge(t *testing.T) {
 	}
 	if err := newCommit("commit split point"); err != nil {
 		t.Error(err)
-	}
-	files, err := getFilenames(wd)
-	if err != nil {
-		t.Error(err)
-	}
-	for _, f := range files {
-		t.Log(f)
 	}
 
 	// target branch
@@ -310,13 +297,6 @@ func TestMerge(t *testing.T) {
 	if err := newCommit("commit target branch"); err != nil {
 		t.Error(err)
 	}
-	files, err = getFilenames(wd)
-	if err != nil {
-		t.Error(err)
-	}
-	for _, f := range files {
-		t.Log(f)
-	}
 
 	// current branch
 	if err := checkoutBranch("main"); err != nil {
@@ -337,13 +317,6 @@ func TestMerge(t *testing.T) {
 	if err := newCommit("commit current branch"); err != nil {
 		t.Error(err)
 	}
-	files, err = getFilenames(wd)
-	if err != nil {
-		t.Error(err)
-	}
-	for _, f := range files {
-		t.Log(f)
-	}
 
 	if err := mergeBranch("target"); err != nil {
 		t.Error(err)
@@ -354,7 +327,7 @@ func TestMerge(t *testing.T) {
 		t.Error(err)
 	}
 
-	if expectedAString := "<<<<<<< HEAD" + "!A" + "=======" + "" + ">>>>>>>"; aString != (expectedAString) {
+	if expectedAString := "<<<<<<< HEAD\n" + "!A" + "=======" + "" + ">>>>>>>"; aString != expectedAString {
 		t.Errorf("Incorrect a.txt conflict file: want '%v', got '%v'.", expectedAString, aString)
 	}
 
@@ -374,4 +347,20 @@ func TestMerge(t *testing.T) {
 		t.Errorf("Incorrect c.txt file: want 'C', got %v.", cString)
 	}
 
+	mergeCommit, err := getHeadCommit()
+	if err != nil {
+		t.Error(err)
+	}
+
+	if mergeCommit.Message != "Merged target into main." {
+		t.Errorf("Incorrect merge commit message: %v", mergeCommit.Message)
+	}
+
+	for file, blob := range mergeCommit.FileToBlob {
+		_, blobContents, err := readBlob(blob)
+		if err != nil {
+			t.Error(err)
+		}
+		t.Logf("%v: %v", file, string(blobContents))
+	}
 }

@@ -12,16 +12,20 @@ import (
 	"time"
 )
 
-var (
-	gitletDir      string = ".gitlet"
-	objectsDir     string = filepath.Join(gitletDir, "objects")
-	branchHeadsDir string = filepath.Join(gitletDir, "refs", "heads")
-	remotesDir     string = filepath.Join(gitletDir, "remotes")
-	headFile       string = filepath.Join(gitletDir, "HEAD")
-	indexFile      string = filepath.Join(gitletDir, "INDEX")
+const (
+	gitletDir              string = ".gitlet"
+	stagedForRemovalMarker string = "DELETED"
 )
 
-const stagedForRemovalMarker string = "DELETED"
+var (
+	objectsDir  string = filepath.Join(gitletDir, "objects")
+	refsDir     string = filepath.Join(gitletDir, "refs")
+	branchesDir string = filepath.Join(refsDir, "heads")
+	remotesDir  string = filepath.Join(refsDir, "remotes")
+	headFile    string = filepath.Join(gitletDir, "HEAD")
+	indexFile   string = filepath.Join(gitletDir, "INDEX")
+	remoteFile  string = filepath.Join(gitletDir, "REMOTE")
+)
 
 // newRepository creates a new Gitlet repository with an initial commit and a main branch.
 // The repository stored in .gitlet contains the necessary directories and files for Gitlet.
@@ -37,7 +41,8 @@ func newRepository() error {
 	if err := errors.Join(
 		os.Mkdir(gitletDir, 0755),
 		os.Mkdir(objectsDir, 0755),
-		os.MkdirAll(branchHeadsDir, 0755),
+		os.Mkdir(refsDir, 0755),
+		os.Mkdir(branchesDir, 0755),
 		os.Mkdir(remotesDir, 0755),
 	); err != nil {
 		return fmt.Errorf("newRepository: %w", err)
@@ -65,7 +70,7 @@ func newRepository() error {
 	}
 
 	// create main branch
-	mainBranchFile := filepath.Join(branchHeadsDir, "main")
+	mainBranchFile := filepath.Join(branchesDir, "main")
 	if err = writeContents(mainBranchFile, []string{initialCommitHash}); err != nil {
 		return fmt.Errorf("initRepository: cannot create main branch: %w", err)
 	}
@@ -412,7 +417,7 @@ func printStatus() error {
 		return fmt.Errorf("printStatus: %w", err)
 	}
 	currentBranch := filepath.Base(currentBranchFile)
-	branches, err := getFilenames(branchHeadsDir)
+	branches, err := getFilenames(branchesDir)
 	if err != nil {
 		return fmt.Errorf("printStatus: %w", err)
 	}
@@ -600,7 +605,7 @@ func checkoutBranch(targetBranch string) error {
 	if targetBranch == currentBranch {
 		log.Fatal("No need to checkout the current branch.")
 	}
-	targetBranchFile := filepath.Join(branchHeadsDir, targetBranch)
+	targetBranchFile := filepath.Join(branchesDir, targetBranch)
 	targetBranchHeadCommitHash, err := readContentsAsString(targetBranchFile)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -671,7 +676,7 @@ func checkoutBranch(targetBranch string) error {
 // Add a new branch pointing to the head commit of the current branch.
 // Does not automatically switch to the new branch.
 func addBranch(branchName string) error {
-	branchFile := filepath.Join(branchHeadsDir, branchName)
+	branchFile := filepath.Join(branchesDir, branchName)
 	if _, err := os.Stat(branchFile); err == nil {
 		log.Fatal("A branch with that name already exists.")
 	} else if !errors.Is(err, fs.ErrNotExist) {
@@ -702,7 +707,7 @@ func removeBranch(branchName string) error {
 		log.Fatal("Cannot remove the current branch.")
 	}
 
-	if err := restrictedDelete(filepath.Join(branchHeadsDir, branchName)); err != nil {
+	if err := restrictedDelete(filepath.Join(branchesDir, branchName)); err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			log.Fatal("A branch with that name does not exist.")
 		}
@@ -792,7 +797,7 @@ func mergeBranch(branchName string) error {
 	}
 
 	// check target branch exists
-	targetBranchFile := filepath.Join(branchHeadsDir, branchName)
+	targetBranchFile := filepath.Join(branchesDir, branchName)
 	targetBranchHeadCommitHash, err := readContentsAsString(targetBranchFile)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -1099,6 +1104,31 @@ func newMergeCommit(
 	// clear index
 	if err := newIndex(); err != nil {
 		return fmt.Errorf("newCommit: cannot clear index: %w", err)
+	}
+	return nil
+}
+
+// addRemote adds a remote Gitlet repository reference.
+//
+// Example:
+//
+//	gitlet add-remote other ../testing/otherdir/.gitlet
+func addRemote(remoteName string, remoteGitletDir string) error {
+	remotes, err := readRemoteIndex()
+	if err != nil {
+		return fmt.Errorf("addRemote: %w", err)
+	}
+	_, ok := remotes[remoteName]
+	if ok {
+		log.Fatal("A remote with that name already exists.")
+	}
+	remotes[remoteName] = remoteMetadata{URL: filepath.FromSlash(remoteGitletDir)}
+	remoteDir := filepath.Join(remotesDir, remoteName)
+	if err := os.Mkdir(remoteDir, 0755); err != nil {
+		return fmt.Errorf("addRemote: %w", err)
+	}
+	if err = writeRemoteIndex(remotes); err != nil {
+		return fmt.Errorf("stageFile: could not update file index: %w", err)
 	}
 	return nil
 }
