@@ -649,7 +649,7 @@ func checkoutBranch(targetBranch string) error {
 		if err != nil {
 			return fmt.Errorf("checkoutBranch: %w", err)
 		}
-		if err := writeContents(file, contents); err != nil {
+		if err := writeContents(file, [][]byte{contents}); err != nil {
 			return fmt.Errorf("checkoutBranch: %w", err)
 		}
 	}
@@ -673,11 +673,13 @@ func checkoutBranch(targetBranch string) error {
 	if err := newIndex(); err != nil {
 		return fmt.Errorf("checkoutBranch: %w", err)
 	}
+
+	log.Printf("Branch '%v' is now checked out.\n", targetBranch)
 	return nil
 }
 
-// Add a new branch pointing to the head commit of the current branch.
-// Does not automatically switch to the new branch.
+// addBranch creates a new branch pointing to the head commit of the current branch.
+// This function does not checkout the new branch.
 func addBranch(branchName string) error {
 	branchFile := filepath.Join(branchesDir, branchName)
 	if _, err := os.Stat(branchFile); err == nil {
