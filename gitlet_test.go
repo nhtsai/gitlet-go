@@ -355,12 +355,4 @@ func TestMerge(t *testing.T) {
 	if mergeCommit.Message != "Merged target into main." {
 		t.Errorf("Incorrect merge commit message: %v", mergeCommit.Message)
 	}
-
-	for file, blob := range mergeCommit.FileToBlob {
-		_, blobContents, err := readBlob(blob)
-		if err != nil {
-			t.Error(err)
-		}
-		t.Logf("%v: %v", file, string(blobContents))
-	}
 }

@@ -919,10 +919,7 @@ func mergeBranch(branchName string) error {
 
 			// 2) modified in current branch, unmodified in target branch
 		} else if modifiedInCurrentBranch && !modifiedInTargetBranch {
-			// keep current branch version and stage
-			if err := stageFile(file); err != nil {
-				return err
-			}
+			// keep current branch version
 			continue
 			// 3) modified in both current and target
 		} else if modifiedInCurrentBranch && modifiedInTargetBranch {
@@ -953,9 +950,6 @@ func mergeBranch(branchName string) error {
 
 		// 4) not in split point, not in target branch, in current branch
 		if !inSplitPointCommit && !inTargetBranchHeadCommit && inCurrentBranchHeadCommit {
-			if err := stageFile(file); err != nil {
-				return err
-			}
 			continue
 		}
 
@@ -1005,7 +999,7 @@ func mergeBranch(branchName string) error {
 			}
 			if err := writeContents(file,
 				[]any{
-					"<<<<<<< HEAD",
+					"<<<<<<< HEAD\n",
 					currentBranchFileContents,
 					"=======",
 					targetBranchFileContents,
@@ -1021,7 +1015,10 @@ func mergeBranch(branchName string) error {
 		}
 	}
 
-	if err := newMergeCommit(branchName, targetBranchHeadCommitHash, currentBranch, currentBranchHeadCommitHash); err != nil {
+	if err := newMergeCommit(
+		branchName, targetBranchHeadCommitHash,
+		currentBranch, currentBranchHeadCommitHash,
+	); err != nil {
 		return fmt.Errorf("mergeBranch: %w", err)
 	}
 	log.Print("Encountered a merge conflict.")
