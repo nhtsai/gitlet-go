@@ -45,14 +45,14 @@ func newRepository() error {
 		os.Mkdir(branchesDir, 0755),
 		os.Mkdir(remotesDir, 0755),
 	); err != nil {
-		return fmt.Errorf("newRepository: %w", err)
+		return fmt.Errorf("newRepository: cannot create dirs: %w", err)
 	}
 
 	initialCommit := commit{
 		Message:    "initial commit",
 		Timestamp:  time.Date(1970, time.January, 1, 0, 0, 0, 0, time.UTC).Unix(),
 		FileToBlob: make(map[string]string),
-		ParentUIDs: [2]string{"", ""},
+		ParentUIDs: [2]string{},
 	}
 
 	contents, err := serialize(initialCommit)
@@ -71,18 +71,23 @@ func newRepository() error {
 
 	// create main branch
 	mainBranchFile := filepath.Join(branchesDir, "main")
-	if err = writeContents(mainBranchFile, []string{initialCommitHash}); err != nil {
+	if err := writeContents(mainBranchFile, []string{initialCommitHash}); err != nil {
 		return fmt.Errorf("initRepository: cannot create main branch: %w", err)
 	}
 
 	// set current branch to main branch
-	if err = writeContents(headFile, []string{mainBranchFile}); err != nil {
+	if err := writeContents(headFile, []string{mainBranchFile}); err != nil {
 		return fmt.Errorf("initRepository: cannot set HEAD file: %w", err)
 	}
 
 	// set up index file
-	if err = newIndex(); err != nil {
+	if err := newIndex(); err != nil {
 		return fmt.Errorf("initRepository: cannot create index: %w", err)
+	}
+
+	// set up remote index file
+	if err := newRemoteIndex(); err != nil {
+		return fmt.Errorf("initRepository: cannot create remote index: %w", err)
 	}
 	return nil
 }
@@ -1130,7 +1135,7 @@ func addRemote(remoteName string, remoteGitletDir string) error {
 		return fmt.Errorf("addRemote: %w", err)
 	}
 	if err = writeRemoteIndex(remotes); err != nil {
-		return fmt.Errorf("stageFile: could not update file index: %w", err)
+		return fmt.Errorf("addRemote: could not update file index: %w", err)
 	}
 	return nil
 }

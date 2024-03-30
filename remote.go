@@ -26,8 +26,15 @@ func writeRemoteIndex(r remoteIndex) error {
 	if err != nil {
 		return fmt.Errorf("writeRemoteIndex: %w", err)
 	}
-	if err = writeContents(indexFile, [][]byte{remoteIndexData}); err != nil {
+	if err = writeContents(remoteFile, [][]byte{remoteIndexData}); err != nil {
 		return fmt.Errorf("writeRemoteIndex: %w", err)
+	}
+	return nil
+}
+
+func newRemoteIndex() error {
+	if err := writeRemoteIndex(make(remoteIndex)); err != nil {
+		return fmt.Errorf("newRemoteIndex: %w", err)
 	}
 	return nil
 }
