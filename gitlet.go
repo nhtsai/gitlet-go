@@ -1139,5 +1139,23 @@ func addRemote(remoteName string, remoteGitletDir string) error {
 	}
 	return nil
 }
+
+// removeRemote removes a remote Gitlet repository and its information.
+func removeRemote(remoteName string) error {
+	remotes, err := readRemoteIndex()
+	if err != nil {
+		return fmt.Errorf("remoteRemote: %w", err)
+	}
+	_, ok := remotes[remoteName]
+	if !ok {
+		log.Fatal("A remote with that name does not exist.")
+	}
+	delete(remotes, remoteName)
+	remoteDir := filepath.Join(remotesDir, remoteName)
+	if err := os.RemoveAll(remoteDir); err != nil {
+		return fmt.Errorf("remoteRemote: %w", err)
+	}
+	return nil
+}
 	return nil
 }

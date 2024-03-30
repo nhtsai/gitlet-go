@@ -123,6 +123,12 @@ func main() {
 		if err := addRemote(remoteName, remoteURL); err != nil {
 			log.Fatal(err)
 		}
+	case "rm-remote":
+		validateArgs(os.Args, 2)
+		remoteName := os.Args[2]
+		if err := removeRemote(remoteName); err != nil {
+			log.Fatal(err)
+		}
 	default:
 		log.Fatal("No command with that name exists.")
 	}
