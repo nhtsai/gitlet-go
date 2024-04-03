@@ -692,15 +692,11 @@ func addBranch(branchName string) error {
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return fmt.Errorf("addBranch: %w", err)
 	}
-	currentBranchFile, err := readContentsAsString(headFile)
+	headCommitHash, err := getHeadCommitHash()
 	if err != nil {
 		return fmt.Errorf("addBranch: %w", err)
 	}
-	headCommitHash, err := readContents(currentBranchFile)
-	if err != nil {
-		return fmt.Errorf("addBranch: %w", err)
-	}
-	if err := writeContents(branchFile, [][]byte{headCommitHash}); err != nil {
+	if err := writeContents(branchFile, []string{headCommitHash}); err != nil {
 		return fmt.Errorf("addBranch: %w", err)
 	}
 	log.Printf("Branch '%v' was created on commit (%v).\n", branchName, string(headCommitHash[:6]))
