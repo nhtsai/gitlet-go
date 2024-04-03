@@ -1119,24 +1119,55 @@ func newMergeCommit(
 //
 // Example:
 //
-//	gitlet add-remote other ../testing/otherdir/.gitlet
+//	$ gitlet add-remote other ../testing/otherdir/.gitlet
 func addRemote(remoteName string, remoteGitletDir string) error {
 	remotes, err := readRemoteIndex()
 	if err != nil {
 		return fmt.Errorf("addRemote: %w", err)
 	}
-	_, ok := remotes[remoteName]
-	if ok {
+	if _, ok := remotes[remoteName]; ok {
 		log.Fatal("A remote with that name already exists.")
 	}
 	remotes[remoteName] = remoteMetadata{URL: filepath.FromSlash(remoteGitletDir)}
+	if err = writeRemoteIndex(remotes); err != nil {
+		return fmt.Errorf("addRemote: could not update file index: %w", err)
+	}
+
 	remoteDir := filepath.Join(remotesDir, remoteName)
 	if err := os.Mkdir(remoteDir, 0755); err != nil {
 		return fmt.Errorf("addRemote: %w", err)
 	}
-	if err = writeRemoteIndex(remotes); err != nil {
-		return fmt.Errorf("addRemote: could not update file index: %w", err)
+
+	// copy remote branches
+	remoteBranchDir := filepath.Join(remoteGitletDir, "refs", "heads")
+	if err := filepath.WalkDir(
+		remoteBranchDir,
+		func(path string, d fs.DirEntry, err error) error {
+			if d.IsDir() {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			contents, err := readContents(path)
+			if err != nil {
+				return err
+			}
+			if err := writeContents(filepath.Join(remoteGitletDir, filepath.Base(path)), contents); err != nil {
+				return err
+			}
+			return err
+		},
+	); err != nil {
+		return fmt.Errorf("addRemote: %w", err)
 	}
+
+	// copy HEAD
+	remoteHead, err := readContentsAsString(filepath.Join(remoteGitletDir, "HEAD"))
+	if err != nil {
+		return fmt.Errorf("addRemote: %w", err)
+	}
+	filepath.Join(remoteDir, filepath.Base(remoteHead))
 	return nil
 }
 
@@ -1144,7 +1175,7 @@ func addRemote(remoteName string, remoteGitletDir string) error {
 func removeRemote(remoteName string) error {
 	remotes, err := readRemoteIndex()
 	if err != nil {
-		return fmt.Errorf("remoteRemote: %w", err)
+		return fmt.Errorf("removeRemote: %w", err)
 	}
 	_, ok := remotes[remoteName]
 	if !ok {
@@ -1153,7 +1184,7 @@ func removeRemote(remoteName string) error {
 	delete(remotes, remoteName)
 	remoteDir := filepath.Join(remotesDir, remoteName)
 	if err := os.RemoveAll(remoteDir); err != nil {
-		return fmt.Errorf("remoteRemote: %w", err)
+		return fmt.Errorf("removeRemote: %w", err)
 	}
 	return nil
 }
