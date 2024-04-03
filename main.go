@@ -129,6 +129,27 @@ func main() {
 		if err := removeRemote(remoteName); err != nil {
 			log.Fatal(err)
 		}
+	case "push":
+		validateArgs(os.Args, 3)
+		remoteName := os.Args[2]
+		remoteBranchName := os.Args[3]
+		if err := push(remoteName, remoteBranchName); err != nil {
+			log.Fatal(err)
+		}
+	case "fetch":
+		validateArgs(os.Args, 3)
+		remoteName := os.Args[2]
+		remoteBranchName := os.Args[3]
+		if err := fetch(remoteName, remoteBranchName); err != nil {
+			log.Fatal(err)
+		}
+	case "pull":
+		validateArgs(os.Args, 3)
+		remoteName := os.Args[2]
+		remoteBranchName := os.Args[3]
+		if err := pull(remoteName, remoteBranchName); err != nil {
+			log.Fatal(err)
+		}
 	default:
 		log.Fatal("No command with that name exists.")
 	}

@@ -1188,5 +1188,238 @@ func removeRemote(remoteName string) error {
 	}
 	return nil
 }
+
+// push appends the current branch's commits to the end of the given branch at the given remote.
+//
+// Example:
+//
+//	$ gitlet push origin main
+func push(remoteName string, remoteBranchName string) error {
+	// get remote directory path
+	remoteIndex, err := readRemoteIndex()
+	if err != nil {
+		return fmt.Errorf("push: %w", err)
+	}
+	remoteMetadata, ok := remoteIndex[remoteName]
+	if !ok {
+		log.Fatal("A remote with that name does not exist.")
+	}
+	if dirInfo, err := os.Stat(remoteMetadata.URL); errors.Is(err, fs.ErrNotExist) || (err == nil && !dirInfo.IsDir()) {
+		log.Fatal("Remote directory not found.")
+	} else if err != nil {
+		return fmt.Errorf("push: %w", err)
+	}
+
+	// get remote branch head commit: ../remoteRepo/.gitlet/heads/{branch}
+	remoteBranchFile := filepath.Join(remoteMetadata.URL, "heads", remoteBranchName)
+	remoteHeadCommitHash, err := readContentsAsString(remoteBranchFile)
+	if errors.Is(err, fs.ErrNotExist) {
+		// create branch on remote repo using current remote HEAD
+		remoteHeadBranchFile, err := readContentsAsString(filepath.Join(remoteMetadata.URL, "HEAD"))
+		if err != nil {
+			return fmt.Errorf("push: %w", err)
+		}
+		remoteHeadCommitHash, err = readContentsAsString(filepath.Join(filepath.Dir(remoteMetadata.URL), remoteHeadBranchFile))
+		if err != nil {
+			return fmt.Errorf("push: %w", err)
+		}
+		// create branch
+		if err := writeContents(filepath.Join(remoteMetadata.URL, "refs", "heads", remoteBranchName), []string{remoteHeadCommitHash}); err != nil {
+			return fmt.Errorf("push: %w", err)
+		}
+	} else if err != nil {
+		return fmt.Errorf("push: %w", err)
+	}
+	currentHeadCommitHash, err := getHeadCommitHash()
+	if err != nil {
+		return fmt.Errorf("push: %w", err)
+	}
+	if currentHeadCommitHash == remoteHeadCommitHash {
+		// no local commits to push to remote
+		return nil
+	}
+
+	// check if remote branch head is in history of current head
+	inHistory := false
+	currentCommit, err := getCommit(currentHeadCommitHash)
+	if err != nil {
+		return fmt.Errorf("push: %w", err)
+	}
+	for {
+		if currentCommit.ParentUIDs[0] == remoteHeadCommitHash {
+			inHistory = true
+			break
+		} else if currentCommit.ParentUIDs[0] == "" {
+			break
+		}
+
+		currentCommit, err = getCommit(currentCommit.ParentUIDs[0])
+		if err != nil {
+			return fmt.Errorf("push: %w", err)
+		}
+	}
+	if !inHistory {
+		log.Fatal("Please pull down remote changes before pushing.")
+	}
+
+	remoteBlobs := make(map[string]bool)
+	files, err := getFilenames(filepath.Join(remoteMetadata.URL, "objects"))
+	if err != nil {
+		return err
+	}
+	for _, blob := range files {
+		remoteBlobs[blob] = true
+	}
+
+	// BFS from local head to remote head commit
+	// copy all local commit and file blobs to remote objects dir
+	queue := []string{currentHeadCommitHash}
+	for len(queue) > 0 {
+
+		// write current blob
+		currentHash := queue[0]
+		queue = queue[1:]
+
+		// break if we reach matching hash
+		if currentHash == remoteHeadCommitHash {
+			break
+		}
+
+		// write commit
+		contents, err := readContents(filepath.Join(objectsDir, currentHash))
+		if err != nil {
+			return err
+		}
+		if err := writeContents(filepath.Join(remoteMetadata.URL, "objects", currentHash), contents); err != nil {
+			return err
+		}
+
+		// write local commit's file blobs to remote
+		currentCommit, err := getCommit(currentHeadCommitHash)
+		if err != nil {
+			return fmt.Errorf("push: %w", err)
+		}
+		// write file blobs
+		for _, blob := range currentCommit.FileToBlob {
+			// skip blobs already in remote repo
+			if _, ok := remoteBlobs[blob]; ok {
+				continue
+			}
+			// copy local blob to remote
+			contents, err := readContents(filepath.Join(objectsDir, blob))
+			if err != nil {
+				return err
+			}
+			if err := writeContents(filepath.Join(remoteMetadata.URL, "objects", blob), contents); err != nil {
+				return err
+			}
+			remoteBlobs[blob] = true
+		}
+
+		// add parent commits to traverse
+		for _, p := range currentCommit.ParentUIDs {
+			if p != "" {
+				queue = append(queue, p)
+			}
+		}
+	}
+
+	// set remote head to same as local head
+	// write current branch head commit UID to remote branch head file
+	if err := writeContents(filepath.Join(remoteMetadata.URL, "refs", "heads", remoteBranchName), []string{currentHeadCommitHash}); err != nil {
+		return err
+	}
+	return nil
+}
+
+// fetch copies all commits and blobs from the given branch in the remote repository
+// (that are not already in the current repository)
+func fetch(remoteName string, remoteBranchName string) error {
+	rIndex, err := readRemoteIndex()
+	if err != nil {
+		return fmt.Errorf("fetch: %w", err)
+	}
+	remoteMetadata, ok := rIndex[remoteName]
+	if !ok {
+		log.Fatal("A remote with that name does not exist.")
+	}
+
+	if dirInfo, err := os.Stat(remoteMetadata.URL); errors.Is(err, fs.ErrNotExist) || (err != nil && !dirInfo.IsDir()) {
+		log.Fatal("Remote directory not found.")
+	} else if err != nil {
+		return fmt.Errorf("fetch: %w", err)
+	}
+
+	remoteBranchHeadCommitUID, err := readContentsAsString(filepath.Join(remoteMetadata.URL, "refs", "heads", remoteBranchName))
+	if errors.Is(err, fs.ErrNotExist) {
+		log.Fatal("That remote does not have that branch.")
+	} else if err != nil {
+		return err
+	}
+
+	// get list of local blobs
+	localBlobs := make(map[string]bool)
+	files, err := getFilenames(objectsDir)
+	if err != nil {
+		return err
+	}
+	for _, blob := range files {
+		localBlobs[blob] = true
+	}
+
+	// BFS from head commit to initial commit?
+	queue := []string{remoteBranchHeadCommitUID}
+	for len(queue) > 0 {
+		commitHash := queue[0]
+		queue = queue[1:]
+
+		// write remote commit to local
+		commitContents, err := readContents(filepath.Join(remoteMetadata.URL, "objects", commitHash))
+		if err != nil {
+			return err
+		}
+		if err := writeContents(filepath.Join(objectsDir, commitHash), [][]byte{commitContents}); err != nil {
+			return err
+		}
+
+		// write remote commit's file blobs
+		curr, err := deserialize[commit](commitContents)
+		if err != nil {
+			return err
+		}
+		for _, blob := range curr.FileToBlob {
+			// skip blobs already in local repo
+			if _, ok := localBlobs[blob]; ok {
+				continue
+			}
+			// copy remote blob to local objects dir
+			contents, err := readContents(filepath.Join(remoteMetadata.URL, "objects", blob))
+			if err != nil {
+				return err
+			}
+			if err := writeContents(filepath.Join(objectsDir, blob), contents); err != nil {
+				return err
+			}
+			localBlobs[blob] = true
+		}
+
+		// add parent commits to traverse
+		for _, p := range curr.ParentUIDs {
+			if p != "" {
+				queue = append(queue, p)
+			}
+		}
+	}
+	return nil
+}
+
+// pull
+func pull(remoteName string, remoteBranchName string) error {
+	if err := fetch(remoteName, remoteBranchName); err != nil {
+		return fmt.Errorf("pull: %w", err)
+	}
+	if err := mergeBranch(remoteBranchName); err != nil {
+		return fmt.Errorf("pull: %w", err)
+	}
 	return nil
 }

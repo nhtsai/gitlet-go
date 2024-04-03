@@ -3,7 +3,8 @@ package main
 import "fmt"
 
 type remoteMetadata struct {
-	URL string
+	Name string
+	URL  string
 }
 
 type remoteIndex map[string]remoteMetadata
