@@ -1,3 +1,3 @@
 module github.com/nhtsai/gitlet-go
 
-go 1.22.3
+go 1.22.5
